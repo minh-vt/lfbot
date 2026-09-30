@@ -11,10 +11,16 @@ public:
 
   void set_config(const PIDConfig& config);
   void set_gains(float kp, float ki, float kd);
+  void get_gains(float& kp, float& ki, float& kd) const {
+    kp = config_.kp;
+    ki = config_.ki;
+    kd = config_.kd;
+  }
+  [[nodiscard]] const PIDConfig& get_config() const { return config_; }
   void reset();
 
   float update(float error, float dt);
-  float update_speed_scaled(float error, float dt, float current_speed, float ref_speed = 1.0f);
+  float update_speed_scaled(float error, float dt, float current_speed, float ref_speed = 0.0f);
 
 private:
   PIDConfig config_{};
