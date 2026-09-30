@@ -1,0 +1,31 @@
+# Build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.bin
+*.elf
+*.hex
+test_runner
+
+# Editor and IDE
+.vscode/
+.idea/
+.zed/
+*.sublime-project
+*.sublime-workspace
+compile_commands.json
+.cache/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
