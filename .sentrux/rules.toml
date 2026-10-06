@@ -1,0 +1,34 @@
+[constraints]
+min_quality = 0.70
+min_acyclicity = 0.99
+max_cycles = 0
+
+[[layers]]
+name = "sim"
+order = 1
+paths = ["firmware/src/sim/**"]
+
+[[layers]]
+name = "system"
+order = 2
+paths = ["firmware/lib/system/**"]
+
+[[layers]]
+name = "control"
+order = 3
+paths = ["firmware/lib/control/**"]
+
+[[layers]]
+name = "track"
+order = 4
+paths = ["firmware/lib/track/**"]
+
+[[layers]]
+name = "math"
+order = 5
+paths = ["firmware/lib/math/**"]
+
+[[layers]]
+name = "config"
+order = 6
+paths = ["firmware/lib/config/**"]
