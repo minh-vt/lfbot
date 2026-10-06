@@ -73,7 +73,7 @@ Luu y khi ve so do nguyen ly tren KiCAD:
 
 ### 3.3. Cum cam bien truoc
 
-* Khoang cach don bay: Tam cum 8 mat quang cach truc banh sau 80 mm.
+* Khoang cach don bay: Tam cum 8 mat quang cach truc banh sau mac dinh 55 mm tren phan mem (`KinematicsConfig::sensor_lookahead_m = 0.055f`), co ranh truot tren khung co khi cho phep can chinh do vuon tu 50 mm den 80 mm.
 * Do cao gam: Mat cam bien cach san 4.0 mm, co khe truot dung tren ga in 3D de tinh chinh do cao tu 3.5 mm den 6.0 mm.
 * Man chan sang: In bang nhua den mo (Matte Black) bao quanh 4 phia cua thanh 8 mat, mep duoi cach san 2.0 mm de hap thu anh sang ngoai vi.
 
