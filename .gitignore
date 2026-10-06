@@ -29,3 +29,6 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Test outputs
+.sim_crash_test.json

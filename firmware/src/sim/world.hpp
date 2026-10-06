@@ -28,12 +28,14 @@ void draw_trajectory_comparison(const std::vector<Vector2>& unoptimized_trail,
 void draw_robot_chassis(float robot_x, float robot_y, float robot_theta, float bar_center_x,
                         float bar_center_y, float wheel_base_m, const lf::SensorData& in,
                         const lf::Telemetry& tel,
-                        const std::array<float, lf::LineSensorConfig::kSensorCount>& weights_mm);
+                        const std::array<float, lf::LineSensorConfig::kSensorCount>& weights_mm,
+                        bool is_crashed = false);
 
 void draw_obstacles(const std::vector<Obstacle>& obstacles, int hovered_idx = -1,
-                    float clearance_radius_mm = 155.0f);
+                    float clearance_radius_mm = 155.0f, int crashed_idx = -1);
 
 void draw_tof_beams(float bar_center_x, float bar_center_y, Vector2 l_origin, Vector2 r_origin,
-                    float robot_theta, const TofHitPoints& hits, const lf::SensorData& in);
+                    float robot_theta, const TofHitPoints& hits, const lf::SensorData& in,
+                    float d_obs_m = 0.35f);
 
 }  // namespace lf::sim

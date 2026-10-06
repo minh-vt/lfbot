@@ -3,80 +3,106 @@
 #include <algorithm>
 #include <cmath>
 
+#include "config/constants.hpp"
+
 namespace lf {
 
-void RelayAutoTuner::start(float relay_amplitude, int target_cycles) {
-  relay_d_ = relay_amplitude;
-  target_cycles_ = target_cycles;
-  state_ = State::kOscillating;
-  cycle_count_ = 0;
-  elapsed_time_ = 0.0f;
-  peak_amp_ = 0.0f;
-  last_zero_cross_time_ = 0.0f;
-  prev_error_ = 0.0f;
-  total_period_sum_ = 0.0f;
+RelayTuner::RelayTuner(float relay_amplitude, float hysteresis_mm)
+  : relay_amp_((relay_amplitude > 0.01f) ? relay_amplitude : 0.12f),
+    hysteresis_mm_((hysteresis_mm > 0.1f) ? hysteresis_mm : 1.0f) {
+  reset();
 }
 
-float RelayAutoTuner::update(float error, float dt) {
-  // Guard clause: Chưa ở chế độ tự dò
-  if (state_ != State::kOscillating) {
+void RelayTuner::reset() {
+  current_steer_ = 0.0f;
+  peak_pos_mm_ = 0.0f;
+  peak_neg_mm_ = 0.0f;
+  cycle_timer_s_ = 0.0f;
+  cycle_count_ = 0;
+  sum_period_s_ = 0.0f;
+  sum_amplitude_mm_ = 0.0f;
+  valid_cycles_count_ = 0;
+  prev_centroid_mm_ = 0.0f;
+  current_amp_mm_ = 0.0f;
+  result_ = TunerResult{};
+}
+
+float RelayTuner::update(float centroid_mm, float dt) {
+  if (result_.converged || dt <= 0.00001f) {
     return 0.0f;
   }
 
-  elapsed_time_ += dt;
-
-  const float abs_err = std::abs(error);
-  peak_amp_ = std::max(abs_err, peak_amp_);
-
-  // Phát hiện giao cắt điểm 0 (Zero-crossing)
-  const bool is_zero_crossing =
-    (prev_error_ <= 0.0f && error > 0.0f) || (prev_error_ >= 0.0f && error < 0.0f);
-
-  if (is_zero_crossing) {
-    if (last_zero_cross_time_ > 0.0f) {
-      const float half_period = elapsed_time_ - last_zero_cross_time_;
-      total_period_sum_ += half_period * 2.0f;
-      cycle_count_++;
-
-      if (cycle_count_ >= target_cycles_) {
-        finish_tuning();
-      }
-    }
-    last_zero_cross_time_ = elapsed_time_;
+  // 1. Relay switching with deadband hysteresis
+  if (centroid_mm > hysteresis_mm_) {
+    current_steer_ = relay_amp_;
+  } else if (centroid_mm < -hysteresis_mm_) {
+    current_steer_ = -relay_amp_;
+  } else if (std::abs(current_steer_) < 0.001f) {
+    current_steer_ = (centroid_mm >= 0.0f) ? relay_amp_ : -relay_amp_;
   }
 
-  prev_error_ = error;
+  // 2. Track peaks within current cycle
+  cycle_timer_s_ += dt;
+  peak_pos_mm_ = std::max(peak_pos_mm_, centroid_mm);
+  peak_neg_mm_ = std::min(peak_neg_mm_, centroid_mm);
 
-  // Xuất tín hiệu Relay
-  return (error >= 0.0f) ? relay_d_ : -relay_d_;
+  // 3. Detect rising zero-crossing (negative to positive transition)
+  const bool rising_crossing = (prev_centroid_mm_ <= 0.0f && centroid_mm > 0.0f);
+  if (rising_crossing && cycle_timer_s_ > 0.12f) {
+    const float cycle_period = cycle_timer_s_;
+    const float cycle_amp = 0.5f * (peak_pos_mm_ - peak_neg_mm_);
+
+    record_cycle(cycle_period, cycle_amp);
+
+    peak_pos_mm_ = centroid_mm;
+    peak_neg_mm_ = 0.0f;
+    cycle_timer_s_ = 0.0f;
+  }
+
+  prev_centroid_mm_ = centroid_mm;
+  return current_steer_;
 }
 
-void RelayAutoTuner::finish_tuning() {
-  if (peak_amp_ <= 0.001f || cycle_count_ == 0) {
-    state_ = State::kFailed;
+void RelayTuner::record_cycle(float period_s, float amplitude_mm) {
+  ++cycle_count_;
+  if (cycle_count_ <= kWarmupCycles) {
     return;
   }
 
-  state_ = State::kConverged;
-}
+  sum_period_s_ += period_s;
+  sum_amplitude_mm_ += amplitude_mm;
+  ++valid_cycles_count_;
+  current_amp_mm_ = amplitude_mm;
 
-void RelayAutoTuner::get_tuned_gains(float& out_kp, float& out_ki, float& out_kd) const {
-  // Guard clause: Nếu chưa hội tụ
-  if (state_ != State::kConverged || peak_amp_ <= 0.0001f || cycle_count_ == 0) {
-    out_kp = 0.0f;
-    out_ki = 0.0f;
-    out_kd = 0.0f;
+  if (valid_cycles_count_ < kRequiredCycles) {
     return;
   }
 
-  constexpr float kPi = 3.14159265f;
-  const float ku = (4.0f * relay_d_) / (kPi * peak_amp_);
-  const float tu = total_period_sum_ / static_cast<float>(cycle_count_);
+  const float avg_tu = sum_period_s_ / static_cast<float>(valid_cycles_count_);
+  const float avg_amp = sum_amplitude_mm_ / static_cast<float>(valid_cycles_count_);
 
-  // Quy chuẩn tối ưu cho Robot bám vạch tốc độ cao (High-Response PD + Low-I)
-  out_kp = std::clamp(ku * 0.45f, 0.015f, 0.120f);
-  out_ki = std::clamp(out_kp / (15.0f * tu), 0.0001f, 0.005f);
-  out_kd = std::clamp(out_kp * (tu * 0.12f), 0.002f, 0.035f);
+  if (avg_amp <= 0.5f) {
+    return;
+  }
+
+  // Åström–Hägglund formula for ultimate gain: Ku = (4 * d) / (pi * A)
+  const float ku = (4.0f * relay_amp_) / (constants::kPi * avg_amp);
+
+  // Ziegler-Nichols PD tuning rule
+  float kp = 0.60f * ku;
+  float kd = kp * (avg_tu / 8.0f);
+
+  // Physical guardrails
+  kp = std::clamp(kp, 0.005f, 0.150f);
+  kd = std::clamp(kd, 0.0005f, 0.050f);
+
+  result_.kp = kp;
+  result_.kd = kd;
+  result_.ultimate_gain = ku;
+  result_.ultimate_period_s = avg_tu;
+  result_.oscillation_amp_mm = avg_amp;
+  result_.cycles_completed = cycle_count_;
+  result_.converged = true;
 }
 
 }  // namespace lf

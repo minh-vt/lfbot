@@ -36,7 +36,7 @@ def build_packet(
     pwm_r: float,
     battery_v: float,
     mode: int = 4,  # kRun2Sprint
-    fsm_state: int = 0,
+    bypass_state: int = 0,
     line_lost: int = 0,
 ) -> bytes:
     payload = struct.pack(
@@ -54,7 +54,7 @@ def build_packet(
         pwm_r,
         battery_v,
         mode,
-        fsm_state,
+        bypass_state,
         line_lost,
         0,  # reserved
     )

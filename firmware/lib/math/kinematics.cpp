@@ -14,15 +14,6 @@ Twist2D DifferentialDriveKinematics::forward(float v_left_mps, float v_right_mps
   return twist;
 }
 
-WheelVelocities DifferentialDriveKinematics::inverse(float linear_v_mps,
-                                                     float angular_w_radps) const {
-  WheelVelocities wheels{};
-  const float half_diff = 0.5f * angular_w_radps * wheel_base_m_;
-  wheels.left_mps = linear_v_mps + half_diff;
-  wheels.right_mps = linear_v_mps - half_diff;
-  return wheels;
-}
-
 float DifferentialDriveKinematics::velocity_to_pwm(float wheel_v_mps, float max_v_mps) {
   // Guard clause: Chống chia cho 0 nếu max_v không hợp lệ (Poka-Yoke)
   if (max_v_mps <= 0.0001f) {

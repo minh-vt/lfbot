@@ -33,10 +33,19 @@ struct Obstacle {
   float angle_deg = 0.0f;
 };
 
+struct TofHitPoint {
+  float x = 0.0f;
+  float y = 0.0f;
+  float distance_mm = 0.0f;
+  bool has_hit = false;
+
+  [[nodiscard]] Vector2 to_vec2() const { return Vector2{x, y}; }
+};
+
 struct TofHitPoints {
-  Vector2 front{};
-  Vector2 left{};
-  Vector2 right{};
+  TofHitPoint front{};
+  TofHitPoint left{};
+  TofHitPoint right{};
 };
 
 struct SimRobotState {
@@ -49,6 +58,8 @@ struct SimRobotState {
   float right_pwm = 0.0f;
   int32_t enc_l = 0;
   int32_t enc_r = 0;
+  double wheel_dist_l_m = 0.0;
+  double wheel_dist_r_m = 0.0;
   bool is_paused = true;
   float sim_time = 0.0f;
   std::deque<Vector2> trail;
@@ -64,6 +75,15 @@ struct SimRobotState {
   bool is_telemetry_mode = false;
   uint32_t packets_received = 0;
   bool is_auto_scale_cam = false;
+  int focused_param_idx = 0;
+  int last_pressed_key = 0;
+  float key_flash_timer = 0.0f;
+  float lateral_accel_mps2 = 0.0f;
+  float longitudinal_accel_mps2 = 0.0f;
+  float prev_v = 0.0f;
+  int hovered_trajectory_idx = -1;
+  bool is_crashed = false;
+  int crashed_obstacle_idx = -1;
 };
 
 }  // namespace lf::sim

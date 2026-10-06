@@ -11,93 +11,82 @@ RobotCoordinator::RobotCoordinator(const RobotConfig& config)
   : config_(config),
     centroid_calc_(config.line_sensor),
     odometry_(config.kinematics),
-    line_pid_(config.line_pid),
-    speed_pid_l_(config.speed_pid_l),
-    speed_pid_r_(config.speed_pid_r),
-    obstacle_fsm_(config.obstacle),
-    profiler_(config.profiler) {
+    follower_(config.line_pid, config.profiler, config.obstacle),
+    planner_(config.environment, config.profiler) {
   init();
 }
 
 void RobotCoordinator::init() {
   mode_ = RobotMode::kIdle;
   telemetry_ = {};
-  segment_start_dist_m_ = 0.0f;
-  current_segment_type_ = SegmentType::kStraight;
   finish_entry_dist_m_ = -1.0f;
+  last_record_dist_m_ = 0.0f;
 
   odometry_.reset();
-  line_pid_.reset();
-  speed_pid_l_.reset();
-  speed_pid_r_.reset();
-  obstacle_fsm_.reset();
-  profiler_.reset();
+  follower_.reset();
+  recorded_trace_.clear();
+  racing_trajectory_.clear();
+  detected_obstacles_.clear();
 }
 
 void RobotCoordinator::reset_pose() {
   mode_ = RobotMode::kIdle;
   telemetry_ = {};
-  segment_start_dist_m_ = 0.0f;
-  current_segment_type_ = SegmentType::kStraight;
   finish_entry_dist_m_ = -1.0f;
+  last_record_dist_m_ = 0.0f;
 
   odometry_.reset();
-  line_pid_.reset();
-  speed_pid_l_.reset();
-  speed_pid_r_.reset();
-  obstacle_fsm_.reset();
-  // Preserve profiler_ to maintain learned track map
+  follower_.reset();
+  // Preserve recorded_trace_, racing_trajectory_, and detected_obstacles_ for Run 2
 }
 
 void RobotCoordinator::set_mode(RobotMode mode) {
   mode_ = mode;
-  line_pid_.reset();
-  speed_pid_l_.reset();
-  speed_pid_r_.reset();
-  obstacle_fsm_.reset();
+  follower_.reset();
   finish_entry_dist_m_ = -1.0f;
+  telemetry_.collision = false;
+  telemetry_.obstacle.collision = false;
+
+  if (mode == RobotMode::kAutoTune) {
+    odometry_.reset();
+    tuner_.reset();
+    return;
+  }
 
   if (mode == RobotMode::kRun1Map) {
-    profiler_.reset();
     odometry_.reset();
-    segment_start_dist_m_ = 0.0f;
-    current_segment_type_ = SegmentType::kStraight;
+    recorded_trace_.clear();
+    racing_trajectory_.clear();
+    detected_obstacles_.clear();
+    last_record_dist_m_ = 0.0f;
     return;
   }
 
   if (mode == RobotMode::kRun2Sprint) {
     odometry_.reset();
+    if (!racing_trajectory_.empty()) {
+      follower_.set_trajectory(racing_trajectory_);
+    }
     return;
   }
 }
 
-void RobotCoordinator::start_auto_tune() {
-  set_mode(RobotMode::kAutoTuning);
-  auto_tuner_.start(0.4f, 6);
+void RobotCoordinator::report_collision(int obstacle_idx) {
+  mode_ = RobotMode::kIdle;
+  telemetry_.collision = true;
+  telemetry_.obstacle.collision = true;
+  (void)obstacle_idx;
+}
+
+void RobotCoordinator::set_racing_trajectory(const std::vector<TrajectoryPoint>& traj) {
+  racing_trajectory_ = traj;
+  follower_.set_trajectory(traj);
 }
 
 void RobotCoordinator::handle_idle_mode(MotorCmd& out) {
   out.left_pwm = 0.0f;
   out.right_pwm = 0.0f;
   out.active_brake = true;
-}
-
-void RobotCoordinator::handle_auto_tune_mode(float centroid_mm, float dt, MotorCmd& out) {
-  const float steer_cmd = auto_tuner_.update(centroid_mm, dt);
-  out.left_pwm = 0.35f + steer_cmd;
-  out.right_pwm = 0.35f - steer_cmd;
-  out.active_brake = false;
-
-  if (auto_tuner_.get_state() != RelayAutoTuner::State::kConverged) {
-    return;
-  }
-
-  float tuned_kp = 0.0f;
-  float tuned_ki = 0.0f;
-  float tuned_kd = 0.0f;
-  auto_tuner_.get_tuned_gains(tuned_kp, tuned_ki, tuned_kd);
-  set_line_pid_gains(tuned_kp, tuned_ki, tuned_kd);
-  set_mode(RobotMode::kIdle);
 }
 
 bool RobotCoordinator::check_finish_condition(bool is_finish, float total_dist, MotorCmd& out) {
@@ -107,18 +96,17 @@ bool RobotCoordinator::check_finish_condition(bool is_finish, float total_dist, 
     }
     finish_entry_dist_m_ = total_dist;
 
-    if (mode_ == RobotMode::kRun1Map) {
-      const float seg_len = finish_entry_dist_m_ - segment_start_dist_m_;
-      profiler_.add_segment(current_segment_type_, seg_len, 0.0f);
-      profiler_.add_segment(SegmentType::kFinishZone, config_.tracking.finish_zone_length_m, 0.0f);
-      profiler_.optimize();
+    if (mode_ == RobotMode::kRun1Map && recorded_trace_.size() > 10) {
+      // Auto-generate global QP time-optimal racing line incorporating detected obstacles
+      racing_trajectory_ = planner_.generate_racing_line(recorded_trace_, detected_obstacles_);
+      follower_.set_trajectory(racing_trajectory_);
     }
   }
 
   const float dist_in_finish = total_dist - finish_entry_dist_m_;
   if (dist_in_finish < config_.tracking.finish_zone_length_m) {
     const float finish_speed = config_.profiler.safe_map_speed_mps * 0.5f;
-    apply_motor_drive(finish_speed, 0.0f, out);
+    follower_.apply_motor_drive(finish_speed, 0.0f, out);
     return true;
   }
 
@@ -129,11 +117,26 @@ bool RobotCoordinator::check_finish_condition(bool is_finish, float total_dist, 
   return true;
 }
 
-void RobotCoordinator::apply_motor_drive(float v_target, float steer, MotorCmd& out) const {
-  const float max_speed = config_.profiler.max_straight_speed_mps;
-  out.left_pwm = DifferentialDriveKinematics::velocity_to_pwm(v_target + steer, max_speed);
-  out.right_pwm = DifferentialDriveKinematics::velocity_to_pwm(v_target - steer, max_speed);
-  out.active_brake = false;
+void RobotCoordinator::handle_auto_tune_mode(float centroid_mm, bool line_found, float dt,
+                                             MotorCmd& out) {
+  if (!line_found) {
+    handle_idle_mode(out);
+    return;
+  }
+
+  const float tuner_speed = std::clamp(config_.profiler.safe_map_speed_mps * 0.5f, 0.20f, 0.40f);
+  const float steer = tuner_.update(centroid_mm, dt);
+  follower_.apply_motor_drive(tuner_speed, steer, out);
+
+  telemetry_.tuner_cycles = tuner_.get_cycle_count();
+  telemetry_.tuner_amplitude_mm = tuner_.get_current_amplitude_mm();
+
+  if (tuner_.is_converged()) {
+    const auto res = tuner_.get_result();
+    set_line_pid_gains(res.kp, 0.0f, res.kd);
+    set_mode(RobotMode::kIdle);
+    handle_idle_mode(out);
+  }
 }
 
 void RobotCoordinator::handle_run_1_map_mode(const SensorData& in, float centroid_mm,
@@ -145,48 +148,59 @@ void RobotCoordinator::handle_run_1_map_mode(const SensorData& in, float centroi
     return;
   }
 
-  obstacle_fsm_.update(in, odometry_.get_current_velocity_mps(), out, line_found);
-  if (obstacle_fsm_.is_bypassing()) {
-    if (current_segment_type_ != SegmentType::kObstacleZone) {
-      const float seg_len = total_dist - segment_start_dist_m_;
-      profiler_.add_segment(current_segment_type_, seg_len, 0.0f);
-      segment_start_dist_m_ = total_dist;
-      current_segment_type_ = SegmentType::kObstacleZone;
+  // Record spatial waypoints every 15mm of travel
+  constexpr float kSampleSpatialStepM = 0.015f;
+  if (recorded_trace_.empty() || (total_dist - last_record_dist_m_) >= kSampleSpatialStepM) {
+    last_record_dist_m_ = total_dist;
+    TrajectoryPoint pt{};
+    pt.x_mm = odometry_.get_x_m() * 1000.0f;
+    pt.y_mm = odometry_.get_y_m() * 1000.0f;
+    pt.s_m = total_dist;
+    pt.heading_rad = odometry_.get_heading_rad();
+    pt.target_speed_mps = config_.profiler.safe_map_speed_mps;
+    pt.curvature_rad_m = 0.0f;
+    recorded_trace_.push_back(pt);
+  }
+
+  // Register detected obstacles into map
+  if (in.tof_front_m > config_.obstacle.min_valid_tof_m &&
+      in.tof_front_m < config_.obstacle.front_detect_dist_m) {
+    const float obs_dist_m = in.tof_front_m + 0.5f * config_.kinematics.wheel_base_m;
+    const float obs_x_mm =
+      (odometry_.get_x_m() + obs_dist_m * std::cos(odometry_.get_heading_rad())) * 1000.0f;
+    const float obs_y_mm =
+      (odometry_.get_y_m() + obs_dist_m * std::sin(odometry_.get_heading_rad())) * 1000.0f;
+
+    bool exists = false;
+    for (const auto& obs : detected_obstacles_) {
+      const float dx = obs.x_mm - obs_x_mm;
+      const float dy = obs.y_mm - obs_y_mm;
+      if (std::sqrt(dx * dx + dy * dy) < 250.0f) {
+        exists = true;
+        break;
+      }
     }
-    return;
+    if (!exists) {
+      detected_obstacles_.push_back({
+        obs_x_mm,
+        obs_y_mm,
+        config_.environment.obstacle_length_mm,
+        config_.environment.obstacle_width_mm,
+        0.0f,
+      });
+    }
   }
 
-  float v_target = config_.profiler.safe_map_speed_mps;
-  if (!line_found) {
-    v_target *= config_.tracking.min_reactive_speed_scale;
-  } else {
-    const float error_factor =
-      std::clamp(1.0f - (std::abs(centroid_mm) / config_.tracking.max_error_mm),
-                 config_.tracking.min_reactive_speed_scale, 1.0f);
-    v_target *= error_factor;
-  }
+  float target_v = 0.0f;
+  float target_steer = 0.0f;
+  int waypoint_idx = 0;
+  uint8_t bypass_state = 0;
 
-  const float steer = line_pid_.update(centroid_mm, dt);
-  apply_motor_drive(v_target, steer, out);
-
-  SegmentType detected_type = SegmentType::kStraight;
-  float curvature = 0.0f;
-  if (std::abs(centroid_mm) > config_.tracking.curve_centroid_threshold_mm) {
-    detected_type = (centroid_mm < 0.0f) ? SegmentType::kCurveLeft : SegmentType::kCurveRight;
-    curvature = (std::abs(centroid_mm) / config_.tracking.max_centroid_curvature_mm) *
-                config_.tracking.max_curvature_rad_m;
-  }
-
-  const bool is_new_segment = (detected_type != current_segment_type_);
-  const bool has_min_length =
-    (total_dist - segment_start_dist_m_ > config_.tracking.min_segment_length_m);
-
-  if (is_new_segment && has_min_length) {
-    const float seg_len = total_dist - segment_start_dist_m_;
-    profiler_.add_segment(current_segment_type_, seg_len, curvature);
-    segment_start_dist_m_ = total_dist;
-    current_segment_type_ = detected_type;
-  }
+  follower_.update(odometry_.get_pose(), odometry_.get_current_velocity_mps(),
+                   odometry_.get_delta_distance_m(), centroid_mm, line_found, dt, in, out, target_v,
+                   target_steer, waypoint_idx, bypass_state);
+  telemetry_.bypass_state = bypass_state;
+  telemetry_.current_segment_idx = waypoint_idx;
 }
 
 void RobotCoordinator::handle_run_2_sprint_mode(const SensorData& in, float centroid_mm,
@@ -198,44 +212,23 @@ void RobotCoordinator::handle_run_2_sprint_mode(const SensorData& in, float cent
     return;
   }
 
-  obstacle_fsm_.update(in, odometry_.get_current_velocity_mps(), out, line_found);
-  if (obstacle_fsm_.is_bypassing()) {
-    return;
-  }
+  float target_v = 0.0f;
+  float target_steer = 0.0f;
+  int waypoint_idx = 0;
+  uint8_t bypass_state = 0;
 
-  float v_target = config_.profiler.safe_map_speed_mps;
-  float ff_steer = 0.0f;
-  int seg_idx = 0;
-
-  if (profiler_.is_optimized()) {
-    profiler_.query(total_dist, v_target, ff_steer, seg_idx);
-    if (finish_entry_dist_m_ < 0.0f) {
-      const float min_approach_speed = config_.profiler.safe_map_speed_mps * 0.5f;
-      v_target = std::max(v_target, min_approach_speed);
-    }
-  } else {
-    const float error_factor =
-      std::clamp(1.0f - (std::abs(centroid_mm) / config_.tracking.max_error_mm),
-                 config_.tracking.min_reactive_speed_scale, 1.0f);
-    v_target = config_.profiler.max_straight_speed_mps * error_factor;
-  }
-
-  if (!line_found) {
-    v_target *= config_.tracking.min_reactive_speed_scale;
-  }
-
-  telemetry_.current_segment_idx = seg_idx;
-  telemetry_.current_velocity_mps = v_target;
-
-  const float steer = line_pid_.update(centroid_mm, dt) + ff_steer;
-  apply_motor_drive(v_target, steer, out);
+  follower_.update(odometry_.get_pose(), odometry_.get_current_velocity_mps(),
+                   odometry_.get_delta_distance_m(), centroid_mm, line_found, dt, in, out, target_v,
+                   target_steer, waypoint_idx, bypass_state);
+  telemetry_.bypass_state = bypass_state;
+  telemetry_.current_segment_idx = waypoint_idx;
+  telemetry_.cross_track_error_m = follower_.get_cross_track_error_m();
+  telemetry_.heading_error_rad = follower_.get_heading_error_rad();
+  telemetry_.target_velocity_mps = target_v;
+  telemetry_.stanley_steer_rad = target_steer;
 }
 
 void RobotCoordinator::update(const SensorData& in, MotorCmd& out) {
-  const float dt =
-    (in.dt > config_.tracking.min_valid_dt_s) ? in.dt : config_.tracking.default_loop_dt_s;
-  odometry_.update(in.enc_left_ticks, in.enc_right_ticks, dt);
-
   float centroid_mm = telemetry_.centroid_pos_mm;
   const bool line_found = centroid_calc_.compute(in.ir_raw, centroid_mm);
   const bool is_finish = centroid_calc_.is_finish_line(in.ir_raw);
@@ -243,90 +236,82 @@ void RobotCoordinator::update(const SensorData& in, MotorCmd& out) {
   if (line_found) {
     telemetry_.centroid_pos_mm = centroid_mm;
   } else {
-    // Line-loss Memory Latch: Khi mat vach, be lai cuc dai ve huong vach vua thoat ra
-    // Neu vach vua mat o ben phai (centroid > 0) -> ep sai so +max_error de re phai gat
-    // Neu vach vua mat o ben trai (centroid < 0) -> ep sai so -max_error de re trai gat
-    centroid_mm = (telemetry_.centroid_pos_mm >= 0.0f) ? config_.tracking.max_error_mm
-                                                       : -config_.tracking.max_error_mm;
+    centroid_mm = 0.0f;
+    telemetry_.centroid_pos_mm = 0.0f;
   }
+
+  odometry_.update(in.enc_left_ticks, in.enc_right_ticks, in.dt);
 
   telemetry_.line_lost = !line_found;
   telemetry_.total_distance_m = odometry_.get_total_distance_m();
   telemetry_.current_velocity_mps = odometry_.get_current_velocity_mps();
+  telemetry_.angular_velocity_radps = odometry_.get_angular_velocity_radps();
+  telemetry_.heading_rad = odometry_.get_heading_rad();
   telemetry_.mode = mode_;
-  telemetry_.fsm_state = static_cast<uint8_t>(obstacle_fsm_.get_state());
 
-  if (mode_ == RobotMode::kIdle || mode_ == RobotMode::kEmergencyStop) {
-    handle_idle_mode(out);
-  } else if (mode_ == RobotMode::kAutoTuning) {
-    handle_auto_tune_mode(centroid_mm, dt, out);
-  } else if (mode_ == RobotMode::kRun1Map) {
-    handle_run_1_map_mode(in, centroid_mm, line_found, is_finish, dt, out);
-  } else if (mode_ == RobotMode::kRun2Sprint) {
-    handle_run_2_sprint_mode(in, centroid_mm, line_found, is_finish, dt, out);
+  telemetry_.wheel_l.actual_speed_mps = odometry_.get_left_velocity_mps();
+  telemetry_.wheel_l.enc_ticks = in.enc_left_ticks;
+  telemetry_.wheel_r.actual_speed_mps = odometry_.get_right_velocity_mps();
+  telemetry_.wheel_r.enc_ticks = in.enc_right_ticks;
+
+  switch (mode_) {
+    case RobotMode::kIdle:
+      handle_idle_mode(out);
+      break;
+    case RobotMode::kAutoTune:
+      handle_auto_tune_mode(centroid_mm, line_found, in.dt, out);
+      break;
+    case RobotMode::kRun1Map:
+      handle_run_1_map_mode(in, centroid_mm, line_found, is_finish, in.dt, out);
+      break;
+    case RobotMode::kRun2Sprint:
+      handle_run_2_sprint_mode(in, centroid_mm, line_found, is_finish, in.dt, out);
+      break;
+    default:
+      handle_idle_mode(out);
+      break;
   }
 
-  // Cap nhat Telemetry chi tiet ve dong co va cam bien vat can ToF
-  telemetry_.wheel_l.enc_ticks = in.enc_left_ticks;
-  telemetry_.wheel_r.enc_ticks = in.enc_right_ticks;
-  telemetry_.wheel_l.actual_speed_mps = odometry_.get_left_velocity_mps();
-  telemetry_.wheel_r.actual_speed_mps = odometry_.get_right_velocity_mps();
   telemetry_.wheel_l.pwm_duty = out.left_pwm;
   telemetry_.wheel_r.pwm_duty = out.right_pwm;
+
   telemetry_.obstacle.tof_front_m = in.tof_front_m;
   telemetry_.obstacle.tof_left_m = in.tof_left_m;
   telemetry_.obstacle.tof_right_m = in.tof_right_m;
   telemetry_.obstacle.nearest_dist_m = std::min({in.tof_front_m, in.tof_left_m, in.tof_right_m});
-  telemetry_.obstacle.detected =
-    obstacle_fsm_.is_bypassing() || (in.tof_front_m < config_.obstacle.front_detect_dist_m);
+  telemetry_.obstacle.detected = (in.tof_front_m < config_.obstacle.front_detect_dist_m);
 }
 
 void RobotCoordinator::set_line_pid_gains(float kp, float ki, float kd) {
   config_.line_pid.kp = std::clamp(kp, 0.005f, 0.200f);
   config_.line_pid.ki = std::clamp(ki, 0.0f, 0.050f);
   config_.line_pid.kd = std::clamp(kd, 0.0005f, 0.050f);
-  line_pid_.set_gains(config_.line_pid.kp, config_.line_pid.ki, config_.line_pid.kd);
+  follower_.get_pid().set_gains(config_.line_pid.kp, config_.line_pid.ki, config_.line_pid.kd);
 }
 
 void RobotCoordinator::get_line_pid_gains(float& kp, float& ki, float& kd) const {
-  kp = config_.line_pid.kp;
-  ki = config_.line_pid.ki;
-  kd = config_.line_pid.kd;
+  follower_.get_pid().get_gains(kp, ki, kd);
 }
 
 void RobotCoordinator::set_tactical_speeds(float safe_map_speed, float max_straight_speed) {
   config_.profiler.safe_map_speed_mps = std::clamp(safe_map_speed, 0.20f, 1.50f);
   config_.profiler.max_straight_speed_mps = std::clamp(max_straight_speed, 0.50f, 4.00f);
-  profiler_.set_config(config_.profiler);
+  follower_.set_dynamics(config_.profiler.max_straight_speed_mps,
+                         config_.profiler.safe_map_speed_mps);
 }
 
 void RobotCoordinator::set_profiler_dynamics(float max_accel, float max_brake, float corner_grip) {
   config_.profiler.max_accel_mps2 = std::clamp(max_accel, 1.0f, 6.0f);
   config_.profiler.max_brake_mps2 = std::clamp(max_brake, 1.5f, 8.0f);
   config_.profiler.corner_grip_mu = std::clamp(corner_grip, 0.3f, 1.2f);
-  profiler_.set_config(config_.profiler);
-}
-
-void RobotCoordinator::set_obstacle_distances(float front_detect_dist_m,
-                                              float approach_stop_dist_m) {
-  config_.obstacle.front_detect_dist_m = std::clamp(front_detect_dist_m, 0.08f, 0.80f);
-  config_.obstacle.approach_stop_dist_m =
-    std::clamp(approach_stop_dist_m, 0.03f, config_.obstacle.front_detect_dist_m - 0.02f);
-  obstacle_fsm_.set_config(config_.obstacle);
-}
-
-void RobotCoordinator::get_obstacle_distances(float& front_detect_dist_m,
-                                              float& approach_stop_dist_m) const {
-  front_detect_dist_m = config_.obstacle.front_detect_dist_m;
-  approach_stop_dist_m = config_.obstacle.approach_stop_dist_m;
+  planner_ = TrajectoryPlanner(config_.environment, config_.profiler);
 }
 
 void RobotCoordinator::set_obstacle_parameters(float front_detect_dist_m, float clearance_m,
                                                float length_m) {
-  config_.obstacle.front_detect_dist_m = std::clamp(front_detect_dist_m, 0.10f, 0.80f);
+  config_.obstacle.front_detect_dist_m = std::clamp(front_detect_dist_m, 0.08f, 0.60f);
   config_.obstacle.bypass_clearance_m = std::clamp(clearance_m, 0.08f, 0.35f);
   config_.obstacle.bypass_length_m = std::clamp(length_m, 0.30f, 1.50f);
-  obstacle_fsm_.set_config(config_.obstacle);
 }
 
 void RobotCoordinator::get_obstacle_parameters(float& front_detect_dist_m, float& clearance_m,

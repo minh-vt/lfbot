@@ -72,22 +72,9 @@ float PIDController::update(float error, float dt) {
 float PIDController::update_speed_scaled(float error, float dt, float current_speed,
                                          float ref_speed) {
   const float v_ref = (ref_speed > 0.01f) ? ref_speed : config_.speed_scale_v_ref;
-  const float v_actual = std::max(0.10f, current_speed);
-  const float raw_scale = v_ref / v_actual;
-  const float scale = std::clamp(raw_scale, config_.speed_scale_min, config_.speed_scale_max);
-
-  const float original_kp = config_.kp;
-  const float original_kd = config_.kd;
-
-  config_.kp = original_kp * scale;
-  config_.kd = original_kd * scale;
-
-  const float output = update(error, dt);
-
-  config_.kp = original_kp;
-  config_.kd = original_kd;
-
-  return output;
+  const float scale = std::clamp(v_ref / std::max(0.10f, current_speed), config_.speed_scale_min,
+                                 config_.speed_scale_max);
+  return std::clamp(update(error, dt) * scale, config_.out_min, config_.out_max);
 }
 
 }  // namespace lf

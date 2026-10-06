@@ -1,39 +1,14 @@
 #include "raycast.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace lf::sim {
 
 namespace {
 
-float raycast_boundary(Vector2 origin, float dir_x, float dir_y, float current_min_mm) {
-  float min_d = current_min_mm;
-  if (dir_x > 1e-5f) {
-    const float d = (kTrackWidthMm - origin.x) / dir_x;
-    if (d > 0.0f && d < min_d) {
-      min_d = d;
-    }
-  } else if (dir_x < -1e-5f) {
-    const float d = (0.0f - origin.x) / dir_x;
-    if (d > 0.0f && d < min_d) {
-      min_d = d;
-    }
-  }
-
-  if (dir_y > 1e-5f) {
-    const float d = (kTrackHeightMm - origin.y) / dir_y;
-    if (d > 0.0f && d < min_d) {
-      min_d = d;
-    }
-  } else if (dir_y < -1e-5f) {
-    const float d = (0.0f - origin.y) / dir_y;
-    if (d > 0.0f && d < min_d) {
-      min_d = d;
-    }
-  }
-  return min_d;
-}
+constexpr float kToFFoVRad = 25.0f * DEG2RAD;  // 25 degree Field-of-View cone
 
 float raycast_obb(Vector2 origin, float dir_x, float dir_y, float current_min_mm,
                   const Obstacle& obs) {
@@ -93,51 +68,76 @@ float raycast_obb(Vector2 origin, float dir_x, float dir_y, float current_min_mm
 
 }  // namespace
 
-float raycast_obstacle_distance(Vector2 origin, float angle_rad, float max_dist_mm,
-                                const std::vector<Obstacle>& obstacles, Vector2* out_hit) {
-  const float dir_x = std::cos(angle_rad);
-  const float dir_y = std::sin(angle_rad);
+float raycast_obstacle_distance(Vector2 origin, float angle_rad, float fov_rad, float max_dist_mm,
+                                const std::vector<Obstacle>& obstacles, TofHitPoint* out_hit) {
+  // Dense conical sector casting: 21 rays spanning the FoV cone [-fov/2, +fov/2]
+  constexpr int kRayCount = 21;
+  const float half_fov = fov_rad * 0.5f;
+  const float angle_step = fov_rad / static_cast<float>(kRayCount - 1);
 
-  float min_dist_mm = max_dist_mm;
+  float overall_min_mm = max_dist_mm;
+  float best_dir_x = std::cos(angle_rad);
+  float best_dir_y = std::sin(angle_rad);
+  bool has_hit = false;
 
-  for (const auto& obs : obstacles) {
-    min_dist_mm = raycast_obb(origin, dir_x, dir_y, min_dist_mm, obs);
-  }
+  for (int i = 0; i < kRayCount; ++i) {
+    const float ray_angle = (angle_rad - half_fov) + static_cast<float>(i) * angle_step;
+    const float dir_x = std::cos(ray_angle);
+    const float dir_y = std::sin(ray_angle);
 
-  // Tinh vi tri cat tia de ve visual tren man hinh
-  float visual_dist_mm = min_dist_mm;
-  if (visual_dist_mm >= max_dist_mm) {
-    visual_dist_mm = raycast_boundary(origin, dir_x, dir_y, max_dist_mm);
+    float ray_min_mm = max_dist_mm;
+    for (const auto& obs : obstacles) {
+      ray_min_mm = raycast_obb(origin, dir_x, dir_y, ray_min_mm, obs);
+    }
+
+    if (ray_min_mm < overall_min_mm) {
+      overall_min_mm = ray_min_mm;
+      best_dir_x = dir_x;
+      best_dir_y = dir_y;
+      has_hit = true;
+    }
   }
 
   if (out_hit != nullptr) {
-    out_hit->x = origin.x + dir_x * visual_dist_mm;
-    out_hit->y = origin.y + dir_y * visual_dist_mm;
+    out_hit->has_hit = has_hit;
+    out_hit->distance_mm = overall_min_mm;
+    if (has_hit) {
+      out_hit->x = origin.x + best_dir_x * overall_min_mm;
+      out_hit->y = origin.y + best_dir_y * overall_min_mm;
+    } else {
+      out_hit->x = origin.x + std::cos(angle_rad) * max_dist_mm;
+      out_hit->y = origin.y + std::sin(angle_rad) * max_dist_mm;
+    }
   }
 
-  return min_dist_mm * 0.001f;
+  if (has_hit) {
+    return overall_min_mm * 0.001f;
+  }
+  return max_dist_mm * 0.001f;
 }
 
 void raycast_all_tof(float robot_x, float robot_y, float robot_theta, float bar_center_x,
                      float bar_center_y, const std::vector<Obstacle>& obstacles, lf::SensorData& in,
-                     TofHitPoints& hits, Vector2& out_l_origin, Vector2& out_r_origin) {
+                     TofHitPoints& hits, Vector2& out_l_origin, Vector2& out_r_origin,
+                     float max_front_dist_m, float max_side_dist_m) {
   const float cos_th = std::cos(robot_theta);
   const float sin_th = std::sin(robot_theta);
 
+  const float front_max_mm = std::max(50.0f, max_front_dist_m * 1000.0f);
+  const float side_max_mm = std::max(50.0f, max_side_dist_m * 1000.0f);
+
   in.tof_front_m = raycast_obstacle_distance(Vector2{bar_center_x, bar_center_y}, robot_theta,
-                                             1200.0f, obstacles, &hits.front);
+                                             kToFFoVRad, front_max_mm, obstacles, &hits.front);
 
   out_l_origin = Vector2{robot_x - (kRobotWidthMm * 0.45f) * (-sin_th),
                          robot_y - (kRobotWidthMm * 0.45f) * cos_th};
-  in.tof_left_m = raycast_obstacle_distance(out_l_origin, robot_theta - 1.5707963f, 600.0f,
-                                            obstacles, &hits.left);
+  in.tof_left_m = raycast_obstacle_distance(out_l_origin, robot_theta - 1.5707963f, kToFFoVRad,
+                                            side_max_mm, obstacles, &hits.left);
 
   out_r_origin = Vector2{robot_x + (kRobotWidthMm * 0.45f) * (-sin_th),
                          robot_y + (kRobotWidthMm * 0.45f) * cos_th};
-  in.tof_right_m = raycast_obstacle_distance(out_r_origin, robot_theta + 1.5707963f, 600.0f,
-                                             obstacles, &hits.right);
-
-  in.tof_side_m = std::min(in.tof_left_m, in.tof_right_m);
+  in.tof_right_m = raycast_obstacle_distance(out_r_origin, robot_theta + 1.5707963f, kToFFoVRad,
+                                             side_max_mm, obstacles, &hits.right);
 }
 
 }  // namespace lf::sim

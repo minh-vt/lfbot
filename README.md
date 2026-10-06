@@ -13,10 +13,11 @@ lfbot/
 ├── .gitignore
 ├── README.md                  # Huong dan tong quan va van hanh
 ├── docs/                      # Tai lieu ky thuat va the le
-│   ├── CONTEXT.md             # Thuat ngu nghiep vu he thong
+│   ├── CONTEXT.md             # Thuat ngu nghiep vu he thong (SSoT)
 │   ├── SPEC.md                # Ban dac ta ky thuat chi tiet
 │   ├── HARDWARE_GUIDE.md      # Huong dan mach in KiCAD va thiet ke co khi 3D
-│   └── manual.md              # The le cuoc thi F-Maze-Solving
+│   ├── manual.md              # The le cuoc thi F-Maze-Solving
+│   └── decisions/             # Ho so quyet dinh kien truc (ADRs)
 ├── hardware/                  # Ho so thiet ke phan cung
 │   ├── pcb/                   # File mach in KiCAD
 │   └── mech/                  # Mo hinh in 3D (.step, .stl)
@@ -25,33 +26,40 @@ lfbot/
     ├── assets/                # Du lieu sa ban
     │   ├── track.png          # Sa ban chuan 2400x1600 (1 px = 1 mm)
     │   └── generate_track.py  # Script sinh sa ban procedural generation
-    ├── lib/                   # Thu vien logic loi doc lap phan cung (C++20)
+    ├── lib/                   # Thu vien logic loi doc lap phan cung (C++17)
     │   ├── config/            # Cau hinh tap trung va kieu du lieu
     │   │   ├── robot_config.hpp
     │   │   └── types.hpp
     │   ├── math/              # Toan hoc, odometry va tinh tam vach
     │   │   ├── centroid.hpp/.cpp
+    │   │   ├── collision.hpp/.cpp
     │   │   ├── kinematics.hpp/.cpp
     │   │   └── odometry.hpp/.cpp
     │   ├── control/           # Thuat toan dieu khien chuyen dong
     │   │   ├── pid_controller.hpp/.cpp
     │   │   ├── relay_tuner.hpp/.cpp
-    │   │   └── velocity_profiler.hpp/.cpp
-    │   ├── fsm/               # May trang thai ne vat can
-    │   │   └── obstacle_fsm.hpp/.cpp
+    │   │   ├── stanley_tracker.hpp/.cpp
+    │   │   └── trajectory_follower.hpp/.cpp
+    │   ├── track/             # Quy hoach quy dao va toi uu hinh hoc sa ban
+    │   │   ├── global_trajectory_optimizer.hpp/.cpp
+    │   │   └── trajectory_planner.hpp/.cpp
     │   └── system/            # Bo dieu phoi trung tam
-    │       └── robot_coordinator.hpp/.cpp
+    │       ├── robot_coordinator.hpp/.cpp
+    │       └── telemetry_packet.hpp
     ├── src/                   # Thuc thi tren tung nen tang
     │   ├── sim/               # Mo phong Desktop (Raylib)
-    │   │   ├── types.hpp      # Dinh nghia kieu du lieu va hang so mo phong
-    │   │   ├── raycast.hpp/.cpp # Giai toan hinh hoc tia laser Ray vs OBB
     │   │   ├── hud.hpp/.cpp   # Giao dien cockpit va tham so thoi gian thuc
+    │   │   ├── race_arbiter.hpp/.cpp # Trong tai thi dau so doc lap giam sat luat
+    │   │   ├── raycast.hpp/.cpp # Giai toan re quat quang hoc 21 tia ToF vs OBB
+    │   │   ├── sim_engine.hpp/.cpp # Dong co vat ly mo phong headless tach biet GUI
+    │   │   ├── types.hpp      # Dinh nghia kieu du lieu va hang so mo phong
     │   │   ├── world.hpp/.cpp # Ve sa ban 2D, khung xe va cum cam bien
-    │   │   └── main.cpp       # Orchestrator dieu phoi mo phong Raylib
+    │   │   └── main.cpp       # Orchestrator dieu phoi mo phong Raylib GUI
     │   └── esp32/             # Firmware nhung (ESP32-S3 FreeRTOS)
     │       └── main.cpp       # Diem vao FreeRTOS tren phan cung thuc
-    └── test/                  # Kiem thu tu dong
-        └── test_core.cpp      # Kiem thu Centroid, Kinematics va Profiler
+    └── test/                  # Kiem thu tu dong Headless
+        ├── test_core.cpp      # Kiem thu don vi toan hoc Centroid, Kinematics, Stanley
+        └── test_simulation.cpp # Kiem thu mo phong headless 2 luot va adversarial tests
 ```
 
 ## 2. Lenh thao tac nhanh (Task Runner - Just)
@@ -63,8 +71,10 @@ Du an su dung `just` (tuong tu npm scripts trong package.json) de quan ly va thu
 just
 
 # Cac lenh thuong dung
-just sim          # Chay mo phong Desktop Raylib
-just test         # Chay toan bo unit tests headless
+just sim          # Chay mo phong Desktop Raylib (GUI danh cho nguoi dung quan sat)
+just test         # Chay toan bo unit tests headless (< 0.3s)
+just sim-test     # Chay kiem thu mo phong headless 2 luot (Map & Sprint) (< 0.5s)
+just check        # Kiem tra toan dien: format + lint + test + sim-test (~ 1.1s)
 just lint         # Kiem tra tinh voi clang-tidy
 just lint-fix     # Tu dong sua loi clang-tidy va format lai code
 just format       # Dinh dang toan bo ma nguon voi clang-format
@@ -105,7 +115,7 @@ pio run -e sim -t exec
 Hoac bien dich truc tiep qua GCC:
 
 ```bash
-g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic \
+g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic \
   -I firmware/lib -I firmware/src/sim \
   firmware/lib/*/*.cpp firmware/src/sim/*.cpp \
   -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 \
@@ -117,7 +127,6 @@ g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic \
 * Che do hoat dong:
   * `[1]`: Chay Luot 1 (Map Scanning & Profile Learning) o toc do an toan.
   * `[2]`: Chay Luot 2 (Sprint theo ho so toi uu, hoac Reactive Sprint neu chua co map).
-  * `[T]`: Kich hoat Relay Auto-Tuning tu dong xac dinh bo thong so PID.
   * `[SPACE]`: Tam dung hoac tiep tuc mo phong.
   * `[R]`: Dat lai robot ve vi tri xuat phat (giu nguyen ban do da hoc).
   * `[Shift + R]`: Dat lai toan bo trang thai robot va xoa sach ban do da hoc.
@@ -146,20 +155,25 @@ g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic \
 
 * Hien thi va So sanh quy dao:
   * Vet net dut xanh ngoc (Cyan dashed trail): Quy dao di chuyen thuc te cua robot o Luot 1 (Unoptimized trail).
-  * Dai ribbon chuyen mau gradient (Amber to Emerald): Quy dao dua toi uu $C^2$ Virtual Chicane du kien cho Luot 2. Mau sac the hien toc do tu thap (cam ho phach) den cao (xanh ngoc luc bao).
+  * Dai ribbon chuyen mau gradient (Amber to Emerald): Quy dao dua toi uu toan cuc (Global Convex QP Trajectory) cho Luot 2. Mau sac the hien toc do tu thap (cam ho phach) den cao (xanh ngoc luc bao).
   * Vong tron an toan (Clearance Ring - $R \approx 155\text{ mm}$): Hien thi truc quan ban kinh an toan tuyet doi quanh vat can o moi goc xoay.
   * Dong ho do goc xoay (Rotation Badge): Hien thi goc xoay $\theta$ thoi gian thuc tren dau moi vat can.
   * Thong so dong hoc banh xe (Cockpit HUD): Hien thi truc quan van toc dat vs thuc te cua banh trai/phai (m/s), xung encoder va khoang cach 3 truc ToF (Front, Left, Right).
 
-## 5. Kiem thu tu dong (Unit Tests)
+## 5. Kiem thu tu dong (Automated Headless Tests)
 
-Bo kiem thu tu dong kiem tra cac bat bien toan hoc cua Centroid, Kinematics, Closed-loop PID, Velocity Profiler va Relay Auto-Tuning.
+He thong ho tro bo kiem thu tu dong Headless khong can mo giao dien do hoa, hoan tat toan bo duoi 1.5 giay:
 
 ```bash
+# 1. Kiem thu toan bo unit tests giai thuat loi (< 0.3s)
 just test
-```
 
-Tat ca kiem thu thuc thi trong moi truong native headless va hoan tat duoi 1 giay.
+# 2. Kiem thu mo phong headless xuyen suot 2 luot chay va 6 adversarial tests (< 0.5s)
+just sim-test
+
+# 3. Kiem tra toan dien: format + lint + unit tests + sim-test (~ 1.1s)
+just check
+```
 
 ## 6. Kiem tra dinh dang ma nguon (Clang-Format)
 

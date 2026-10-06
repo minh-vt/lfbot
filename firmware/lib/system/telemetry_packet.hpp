@@ -24,9 +24,9 @@ struct TelemetryPacket {
   float right_pwm = 0.0f;
   float battery_voltage_v = 8.4f;
   uint8_t mode = 0;
-  uint8_t fsm_state = 0;
+  uint8_t bypass_state = 0;
   uint8_t line_lost = 0;
-  uint8_t reserved = 0;
+  uint8_t collision = 0;
   uint32_t checksum = 0;
 
   [[nodiscard]] static uint32_t compute_checksum(const TelemetryPacket& pkt) {

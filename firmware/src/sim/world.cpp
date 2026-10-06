@@ -37,7 +37,7 @@ void draw_rotated_box(Vector2 center, float width, float height, float angle_deg
 }
 
 void draw_hazard_obstacle(const Obstacle& obs, bool is_hovered, float clearance_radius_mm) {
-  // Vanh đai an toan ngoai tiep R_clearance tranh va cham cho moi goc xoay
+  // Circumscribed safety clearance circle R_clearance preventing collisions at any orientation
   const Color clearance_col = is_hovered ? ColorAlpha(Color{251, 191, 36, 255}, 0.18f)
                                          : ColorAlpha(Color{148, 163, 184, 255}, 0.08f);
   const Color ring_col = is_hovered ? Color{251, 191, 36, 180} : Color{148, 163, 184, 90};
@@ -125,22 +125,32 @@ void draw_trajectory_comparison(const std::vector<Vector2>& unoptimized_trail,
 void draw_robot_chassis(float robot_x, float robot_y, float robot_theta, float bar_center_x,
                         float bar_center_y, float wheel_base_m, const lf::SensorData& in,
                         const lf::Telemetry& tel,
-                        const std::array<float, lf::LineSensorConfig::kSensorCount>& weights_mm) {
+                        const std::array<float, lf::LineSensorConfig::kSensorCount>& weights_mm,
+                        bool is_crashed) {
   const float cos_th = std::cos(robot_theta);
   const float sin_th = std::sin(robot_theta);
 
-  // Khung xe
+  // Khung xe (Chassis highlighted red if crashed)
+  const Color chassis_fill = is_crashed ? Color{127, 29, 29, 240} : Color{26, 32, 44, 230};
+  const Color chassis_border = is_crashed ? Color{239, 68, 68, 255} : Color{56, 189, 248, 255};
   draw_rotated_box(Vector2{robot_x, robot_y}, kRobotLengthMm, kRobotWidthMm, robot_theta * RAD2DEG,
-                   Color{26, 32, 44, 230}, Color{56, 189, 248, 255}, 2.0f);
+                   chassis_fill, chassis_border, is_crashed ? 3.5f : 2.0f);
 
   // Mui ten chi huong mui xe
-  const Vector2 fwd_tip = {robot_x + (kRobotLengthMm * 0.46f) * cos_th,
-                           robot_y + (kRobotLengthMm * 0.46f) * sin_th};
-  const Vector2 fwd_l = {robot_x + (kRobotLengthMm * 0.18f) * cos_th - 16.0f * sin_th,
-                         robot_y + (kRobotLengthMm * 0.18f) * sin_th + 16.0f * cos_th};
-  const Vector2 fwd_r = {robot_x + (kRobotLengthMm * 0.18f) * cos_th + 16.0f * sin_th,
-                         robot_y + (kRobotLengthMm * 0.18f) * sin_th - 16.0f * cos_th};
-  DrawTriangle(fwd_tip, fwd_l, fwd_r, Color{56, 189, 248, 220});
+  const Color fwd_col = is_crashed ? Color{239, 68, 68, 240} : Color{56, 189, 248, 220};
+  const Vector2 fwd_tip = {
+    robot_x + (kRobotLengthMm * 0.46f) * cos_th,
+    robot_y + (kRobotLengthMm * 0.46f) * sin_th,
+  };
+  const Vector2 fwd_l = {
+    robot_x + (kRobotLengthMm * 0.18f) * cos_th - 16.0f * sin_th,
+    robot_y + (kRobotLengthMm * 0.18f) * sin_th + 16.0f * cos_th,
+  };
+  const Vector2 fwd_r = {
+    robot_x + (kRobotLengthMm * 0.18f) * cos_th + 16.0f * sin_th,
+    robot_y + (kRobotLengthMm * 0.18f) * sin_th - 16.0f * cos_th,
+  };
+  DrawTriangle(fwd_tip, fwd_l, fwd_r, fwd_col);
 
   // 2 Banh xe chu dong vi sai
   const float half_wb = wheel_base_m * 500.0f;
@@ -180,15 +190,23 @@ void draw_robot_chassis(float robot_x, float robot_y, float robot_theta, float b
 }
 
 void draw_obstacles(const std::vector<Obstacle>& obstacles, int hovered_idx,
-                    float clearance_radius_mm) {
+                    float clearance_radius_mm, int crashed_idx) {
   for (size_t i = 0; i < obstacles.size(); ++i) {
     const bool is_hovered = (static_cast<int>(i) == hovered_idx);
-    draw_hazard_obstacle(obstacles.at(i), is_hovered, clearance_radius_mm);
+    const bool is_crashed = (static_cast<int>(i) == crashed_idx);
+    draw_hazard_obstacle(obstacles.at(i), is_hovered || is_crashed, clearance_radius_mm);
+    if (is_crashed) {
+      draw_rotated_box(obstacles.at(i).pos, obstacles.at(i).width_mm + 10.0f,
+                       obstacles.at(i).height_mm + 10.0f, obstacles.at(i).angle_deg,
+                       ColorAlpha(Color{239, 68, 68, 255}, 0.35f), Color{239, 68, 68, 255}, 3.0f);
+    }
   }
 }
 
 void draw_tof_beams(float bar_center_x, float bar_center_y, Vector2 l_origin, Vector2 r_origin,
-                    float robot_theta, const TofHitPoints& hits, const lf::SensorData& in) {
+                    float robot_theta, const TofHitPoints& hits, const lf::SensorData& in,
+                    float d_obs_m) {
+  (void)in;
   draw_rotated_box(Vector2{bar_center_x, bar_center_y}, 14.0f, 10.0f, robot_theta * RAD2DEG,
                    Color{15, 23, 42, 255}, Color{56, 189, 248, 255}, 1.0f);
   draw_rotated_box(l_origin, 10.0f, 12.0f, (robot_theta - 1.5707963f) * RAD2DEG,
@@ -196,24 +214,85 @@ void draw_tof_beams(float bar_center_x, float bar_center_y, Vector2 l_origin, Ve
   draw_rotated_box(r_origin, 10.0f, 12.0f, (robot_theta + 1.5707963f) * RAD2DEG,
                    Color{15, 23, 42, 255}, Color{192, 132, 252, 255}, 1.0f);
 
-  const Color f_col = (in.tof_front_m < 0.15f) ? Color{248, 113, 113, 255}
-                                               : ColorAlpha(Color{56, 189, 248, 255}, 0.75f);
-  DrawLineEx(Vector2{bar_center_x, bar_center_y}, hits.front,
-             (in.tof_front_m < 0.15f) ? 3.0f : 1.8f, f_col);
-  DrawCircle(static_cast<int>(hits.front.x), static_cast<int>(hits.front.y),
-             (in.tof_front_m < 0.15f) ? 5.5f : 3.5f, f_col);
-  if (in.tof_front_m < 0.15f) {
+  constexpr float kHalfFovDeg = 12.5f;
+
+  // 1. Front ToF 25-degree Raycone (dynamic active sensing cone governed by D_obs)
+  const float d_obs_mm = std::max(80.0f, d_obs_m * 1000.0f);
+  const float front_deg = robot_theta * RAD2DEG;
+  const Vector2 front_origin = {bar_center_x, bar_center_y};
+
+  if (hits.front.has_hit) {
+    const float hit_dist = std::clamp(hits.front.distance_mm, 10.0f, d_obs_mm);
+    const Color alert_col = Color{239, 68, 68, 255};  // Red Alert
+
+    // Truncated illuminated active beam stopping at obstacle face
+    DrawCircleSector(front_origin, hit_dist, front_deg - kHalfFovDeg, front_deg + kHalfFovDeg, 24,
+                     ColorAlpha(alert_col, 0.28f));
+    DrawCircleSectorLines(front_origin, hit_dist, front_deg - kHalfFovDeg, front_deg + kHalfFovDeg,
+                          24, ColorAlpha(alert_col, 0.90f));
+
+    // Ghost boundary indicating occluded detection zone up to D_obs
+    DrawCircleSectorLines(front_origin, d_obs_mm, front_deg - kHalfFovDeg, front_deg + kHalfFovDeg,
+                          24, ColorAlpha(Color{148, 163, 184, 255}, 0.22f));
+
+    // Internal optical sightline to exact contact point on obstacle
+    DrawLineEx(front_origin, hits.front.to_vec2(), 2.5f, alert_col);
+
+    // Target radar ring on obstacle surface
+    DrawCircle(static_cast<int>(hits.front.x), static_cast<int>(hits.front.y), 5.0f, alert_col);
     DrawCircleLines(static_cast<int>(hits.front.x), static_cast<int>(hits.front.y), 9.0f,
-                    Color{248, 113, 113, 200});
+                    ColorAlpha(alert_col, 0.85f));
+  } else {
+    // Open scan raycone freely illuminating up to D_obs (no obstacle in cone)
+    const Color scan_col = Color{56, 189, 248, 255};  // High-tech Cyan
+    DrawCircleSector(front_origin, d_obs_mm, front_deg - kHalfFovDeg, front_deg + kHalfFovDeg, 24,
+                     ColorAlpha(scan_col, 0.09f));
+    DrawCircleSectorLines(front_origin, d_obs_mm, front_deg - kHalfFovDeg, front_deg + kHalfFovDeg,
+                          24, ColorAlpha(scan_col, 0.45f));
   }
 
-  const Color l_col = ColorAlpha(Color{251, 191, 36, 255}, 0.85f);
-  DrawLineEx(l_origin, hits.left, 1.8f, l_col);
-  DrawCircle(static_cast<int>(hits.left.x), static_cast<int>(hits.left.y), 3.5f, l_col);
+  // 2. Left ToF 25-degree Raycone (Side flank scanning, 200mm range)
+  constexpr float kSideRangeMm = 200.0f;
+  const float left_deg = (robot_theta - 1.5707963f) * RAD2DEG;
+  const Color l_col = Color{251, 191, 36, 255};  // Amber
 
-  const Color r_col = ColorAlpha(Color{192, 132, 252, 255}, 0.85f);
-  DrawLineEx(r_origin, hits.right, 1.8f, r_col);
-  DrawCircle(static_cast<int>(hits.right.x), static_cast<int>(hits.right.y), 3.5f, r_col);
+  if (hits.left.has_hit) {
+    const float hit_dist = std::clamp(hits.left.distance_mm, 10.0f, kSideRangeMm);
+    DrawCircleSector(l_origin, hit_dist, left_deg - kHalfFovDeg, left_deg + kHalfFovDeg, 20,
+                     ColorAlpha(l_col, 0.30f));
+    DrawCircleSectorLines(l_origin, hit_dist, left_deg - kHalfFovDeg, left_deg + kHalfFovDeg, 20,
+                          ColorAlpha(l_col, 0.90f));
+    DrawCircleSectorLines(l_origin, kSideRangeMm, left_deg - kHalfFovDeg, left_deg + kHalfFovDeg,
+                          20, ColorAlpha(Color{148, 163, 184, 255}, 0.20f));
+    DrawLineEx(l_origin, hits.left.to_vec2(), 2.0f, l_col);
+    DrawCircle(static_cast<int>(hits.left.x), static_cast<int>(hits.left.y), 4.0f, l_col);
+  } else {
+    DrawCircleSector(l_origin, kSideRangeMm, left_deg - kHalfFovDeg, left_deg + kHalfFovDeg, 20,
+                     ColorAlpha(l_col, 0.08f));
+    DrawCircleSectorLines(l_origin, kSideRangeMm, left_deg - kHalfFovDeg, left_deg + kHalfFovDeg,
+                          20, ColorAlpha(l_col, 0.35f));
+  }
+
+  // 3. Right ToF 25-degree Raycone (Side flank scanning, 200mm range)
+  const float right_deg = (robot_theta + 1.5707963f) * RAD2DEG;
+  const Color r_col = Color{192, 132, 252, 255};  // Purple
+
+  if (hits.right.has_hit) {
+    const float hit_dist = std::clamp(hits.right.distance_mm, 10.0f, kSideRangeMm);
+    DrawCircleSector(r_origin, hit_dist, right_deg - kHalfFovDeg, right_deg + kHalfFovDeg, 20,
+                     ColorAlpha(r_col, 0.30f));
+    DrawCircleSectorLines(r_origin, hit_dist, right_deg - kHalfFovDeg, right_deg + kHalfFovDeg, 20,
+                          ColorAlpha(r_col, 0.90f));
+    DrawCircleSectorLines(r_origin, kSideRangeMm, right_deg - kHalfFovDeg, right_deg + kHalfFovDeg,
+                          20, ColorAlpha(Color{148, 163, 184, 255}, 0.20f));
+    DrawLineEx(r_origin, hits.right.to_vec2(), 2.0f, r_col);
+    DrawCircle(static_cast<int>(hits.right.x), static_cast<int>(hits.right.y), 4.0f, r_col);
+  } else {
+    DrawCircleSector(r_origin, kSideRangeMm, right_deg - kHalfFovDeg, right_deg + kHalfFovDeg, 20,
+                     ColorAlpha(r_col, 0.08f));
+    DrawCircleSectorLines(r_origin, kSideRangeMm, right_deg - kHalfFovDeg, right_deg + kHalfFovDeg,
+                          20, ColorAlpha(r_col, 0.35f));
+  }
 }
 
 }  // namespace lf::sim

@@ -1,5 +1,7 @@
 #include "math/odometry.hpp"
 
+#include <cmath>
+
 namespace lf {
 
 OdometryTracker::OdometryTracker(const KinematicsConfig& config) : config_(config) {
@@ -15,6 +17,10 @@ void OdometryTracker::reset() {
   last_delta_dist_m_ = 0.0f;
   vl_mps_ = 0.0f;
   vr_mps_ = 0.0f;
+  heading_rad_ = 0.0f;
+  x_m_ = 0.0f;
+  y_m_ = 0.0f;
+  angular_velocity_radps_ = 0.0f;
 }
 
 void OdometryTracker::update(int32_t enc_left, int32_t enc_right, float dt) {
@@ -45,6 +51,18 @@ void OdometryTracker::update(int32_t enc_left, int32_t enc_right, float dt) {
   current_velocity_mps_ = last_delta_dist_m_ / dt;
   vl_mps_ = dist_l / dt;
   vr_mps_ = dist_r / dt;
+
+  if (config_.wheel_base_m > 0.001f) {
+    const float delta_theta = (dist_l - dist_r) / config_.wheel_base_m;
+    const float mid_heading = heading_rad_ + 0.5f * delta_theta;
+    heading_rad_ += delta_theta;
+    angular_velocity_radps_ = (vl_mps_ - vr_mps_) / config_.wheel_base_m;
+    x_m_ += last_delta_dist_m_ * std::cos(mid_heading);
+    y_m_ += last_delta_dist_m_ * std::sin(mid_heading);
+  } else {
+    x_m_ += last_delta_dist_m_ * std::cos(heading_rad_);
+    y_m_ += last_delta_dist_m_ * std::sin(heading_rad_);
+  }
 }
 
 }  // namespace lf

@@ -11,6 +11,13 @@ sim:
 test:
     cd firmware && pio run -e test_core -t exec
 
+# Chay kiem thu mo phong headless 2 luot (Map & Sprint)
+sim-test:
+    cd firmware && pio run -e sim_test -t exec
+
+# Kiem tra toan dien: format + lint + test + sim-test
+check: format-check test sim-test
+
 # Tu dong format toan bo ma nguon bang clang-format
 format:
     clang-format -i firmware/lib/*/*.hpp firmware/lib/*/*.cpp firmware/src/*/*.hpp firmware/src/*/*.cpp firmware/test/*.cpp

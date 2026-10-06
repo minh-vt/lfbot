@@ -4,20 +4,21 @@
 #include <cstdio>
 #include <vector>
 
-#include "control/trajectory_planner.hpp"
 #include "hud.hpp"
+#include "math/collision.hpp"
 #include "math/kinematics.hpp"
 #include "raycast.hpp"
 #include "raylib.h"
 #include "raymath.h"
 #include "system/robot_coordinator.hpp"
 #include "telemetry_receiver.hpp"
+#include "track/trajectory_planner.hpp"
 #include "types.hpp"
 #include "world.hpp"
 
 namespace {
 
-void recompute_racing_trajectory(const lf::RobotCoordinator& robot,
+void recompute_racing_trajectory(lf::RobotCoordinator& robot,
                                  const std::vector<lf::sim::Obstacle>& obstacles,
                                  lf::sim::SimRobotState& state) {
   if (state.unoptimized_trail.size() < 10) {
@@ -38,13 +39,17 @@ void recompute_racing_trajectory(const lf::RobotCoordinator& robot,
 
   const lf::TrajectoryPlanner planner(robot.get_config().environment, robot.get_config().profiler);
   state.planned_trajectory = planner.generate_racing_line(raw_path, obs_geom);
+
+  // Convert arena-frame trajectory to robot local odometry frame (origin at start line (0, 0))
+  std::vector<lf::TrajectoryPoint> local_traj = state.planned_trajectory;
+  for (auto& pt : local_traj) {
+    pt.x_mm -= lf::sim::kStartPosX;
+    pt.y_mm -= lf::sim::kStartPosY;
+  }
+  robot.set_racing_trajectory(local_traj);
 }
 
-void handle_reset_hotkey(lf::RobotCoordinator& robot, lf::sim::SimRobotState& state,
-                         char* toast_msg, size_t toast_size, float& toast_timer) {
-  if (!IsKeyPressed(KEY_R)) {
-    return;
-  }
+void reset_sim_pose(lf::sim::SimRobotState& state, bool is_paused) {
   state.x = lf::sim::kStartPosX;
   state.y = lf::sim::kStartPosY;
   state.theta = 0.0f;
@@ -52,9 +57,21 @@ void handle_reset_hotkey(lf::RobotCoordinator& robot, lf::sim::SimRobotState& st
   state.w = 0.0f;
   state.enc_l = 0;
   state.enc_r = 0;
-  state.is_paused = true;
+  state.wheel_dist_l_m = 0.0;
+  state.wheel_dist_r_m = 0.0;
+  state.is_paused = is_paused;
   state.sim_time = 0.0f;
   state.trail.clear();
+  state.is_crashed = false;
+  state.crashed_obstacle_idx = -1;
+}
+
+void handle_reset_hotkey(lf::RobotCoordinator& robot, lf::sim::SimRobotState& state,
+                         char* toast_msg, size_t toast_size, float& toast_timer) {
+  if (!IsKeyPressed(KEY_R)) {
+    return;
+  }
+  reset_sim_pose(state, true);
 
   if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
     robot.init();
@@ -64,10 +81,10 @@ void handle_reset_hotkey(lf::RobotCoordinator& robot, lf::sim::SimRobotState& st
     state.run2_time_s = 0.0f;
     state.has_run1_data = false;
     state.has_run2_data = false;
-    (void)snprintf(toast_msg, toast_size, "RESET TOAN BO: Xoa pose va toan bo ban do hoc.");
+    (void)snprintf(toast_msg, toast_size, "FULL RESET: Cleared pose, map, and profiles.");
   } else {
     robot.reset_pose();
-    (void)snprintf(toast_msg, toast_size, "RESET POSE: Dat lai vi tri (Giu nguyen ban do)");
+    (void)snprintf(toast_msg, toast_size, "RESET POSE: Reset position (Map preserved).");
   }
   toast_timer = 2.5f;
 }
@@ -93,10 +110,10 @@ void handle_mode_hotkeys(lf::RobotCoordinator& robot,
       state.trail.clear();
       state.packets_received = 0;
       (void)snprintf(toast_msg, toast_size,
-                     "GROUND STATION: Bat thu UDP (Port 9876). Dang cho ket noi robot...");
+                     "GROUND STATION: Listening on UDP 9876. Awaiting telemetry...");
       toast_timer = 4.0f;
     } else {
-      (void)snprintf(toast_msg, toast_size, "SANDBOX SIM: Da tro ve che do mo phong cuc bo.");
+      (void)snprintf(toast_msg, toast_size, "LOCAL SIM: Returned to local simulation mode.");
       toast_timer = 3.0f;
     }
   }
@@ -107,23 +124,27 @@ void handle_mode_hotkeys(lf::RobotCoordinator& robot,
       state.has_run1_data = true;
       recompute_racing_trajectory(robot, obstacles, state);
       (void)snprintf(toast_msg, toast_size,
-                     "CHOT QUY DAO C2: Da render ngay quy dao dua toi uu tu vet chay!");
+                     "COMMITTED C2: Generated racing trajectory from run trail.");
       toast_timer = 3.5f;
     } else {
-      (void)snprintf(toast_msg, toast_size, "CHUA DU DU LIEU: Robot can chay mot doan de ghi vet.");
+      (void)snprintf(toast_msg, toast_size, "INSUFFICIENT DATA: Record trail points first.");
       toast_timer = 2.0f;
     }
   }
+  if (IsKeyPressed(KEY_T)) {
+    robot.set_mode(lf::RobotMode::kAutoTune);
+    reset_sim_pose(state, false);
+    (void)snprintf(toast_msg, toast_size,
+                   "AUTO-TUNE ACTIVE: Åström–Hägglund Relay limit cycle running...");
+    toast_timer = 3.5f;
+  }
   if (IsKeyPressed(KEY_ONE)) {
     robot.set_mode(lf::RobotMode::kRun1Map);
-    state.is_paused = false;
-    state.sim_time = 0.0f;
-    state.trail.clear();
-    (void)snprintf(toast_msg, toast_size, "KICH HOAT: Run 1 (Map Scanning & Profile Learning)");
+    reset_sim_pose(state, false);
+    (void)snprintf(toast_msg, toast_size, "RUN 1 ACTIVE: Map Scanning & Profile Learning");
     toast_timer = 3.0f;
   }
   if (IsKeyPressed(KEY_TWO)) {
-    // Luu lai vet chay thuc te Run 1 neu chua co
     if (state.unoptimized_trail.empty() && state.trail.size() > 10) {
       state.unoptimized_trail.assign(state.trail.begin(), state.trail.end());
       state.run1_time_s = state.sim_time;
@@ -132,21 +153,12 @@ void handle_mode_hotkeys(lf::RobotCoordinator& robot,
     recompute_racing_trajectory(robot, obstacles, state);
 
     robot.set_mode(lf::RobotMode::kRun2Sprint);
-    state.is_paused = false;
-    state.sim_time = 0.0f;
-    state.trail.clear();
-    if (robot.get_profiler().is_optimized()) {
-      (void)snprintf(toast_msg, toast_size, "KICH HOAT: Run 2 (C2 Sprint theo ho so toi uu)");
+    reset_sim_pose(state, false);
+    if (robot.get_follower().has_trajectory()) {
+      (void)snprintf(toast_msg, toast_size, "RUN 2 ACTIVE: C2 Optimized Sprint");
     } else {
-      (void)snprintf(toast_msg, toast_size,
-                     "KICH HOAT: Run 2 (Sprint phan xa truc tiep theo V_sprint)");
+      (void)snprintf(toast_msg, toast_size, "RUN 2 ACTIVE: Direct Sprint");
     }
-    toast_timer = 3.0f;
-  }
-  if (IsKeyPressed(KEY_T)) {
-    robot.start_auto_tune();
-    state.is_paused = false;
-    (void)snprintf(toast_msg, toast_size, "KICH HOAT: Relay Auto-Tuning PID...");
     toast_timer = 3.0f;
   }
   handle_reset_hotkey(robot, state, toast_msg, toast_size, toast_timer);
@@ -162,37 +174,37 @@ void handle_pid_tuning_hotkeys(lf::RobotCoordinator& robot, char* toast_msg, siz
   if (IsKeyPressed(KEY_U)) {
     robot.set_line_pid_gains(cur_kp + 0.005f, cur_ki, cur_kd);
     robot.get_line_pid_gains(cur_kp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Line PID Kp = %.4f", cur_kp);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Line PID Kp = %.4f", cur_kp);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_J)) {
     robot.set_line_pid_gains(cur_kp - 0.005f, cur_ki, cur_kd);
     robot.get_line_pid_gains(cur_kp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Line PID Kp = %.4f", cur_kp);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Line PID Kp = %.4f", cur_kp);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_I)) {
     robot.set_line_pid_gains(cur_kp, cur_ki, cur_kd + 0.001f);
     robot.get_line_pid_gains(cur_kp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Line PID Kd = %.4f", cur_kd);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Line PID Kd = %.4f", cur_kd);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_K)) {
     robot.set_line_pid_gains(cur_kp, cur_ki, cur_kd - 0.001f);
     robot.get_line_pid_gains(cur_kp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Line PID Kd = %.4f", cur_kd);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Line PID Kd = %.4f", cur_kd);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_P)) {
     robot.set_line_pid_gains(cur_kp, cur_ki + 0.0001f, cur_kd);
     robot.get_line_pid_gains(cur_kp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Line PID Ki = %.5f", cur_ki);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Line PID Ki = %.5f", cur_ki);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_L)) {
     robot.set_line_pid_gains(cur_kp, cur_ki - 0.0001f, cur_kd);
     robot.get_line_pid_gains(cur_kp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Line PID Ki = %.5f", cur_ki);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Line PID Ki = %.5f", cur_ki);
     toast_timer = 2.5f;
   }
 }
@@ -210,78 +222,74 @@ void handle_tactical_tuning_hotkeys(lf::RobotCoordinator& robot, char* toast_msg
   if (IsKeyPressed(KEY_Y)) {
     robot.set_obstacle_parameters(cur_obs_front + 0.02f, cur_obs_clear, cur_obs_len);
     robot.get_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Khoang cach vat can D_obs = %.2f m",
-                   cur_obs_front);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Obstacle Dist D_obs = %.2f m", cur_obs_front);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_H)) {
     robot.set_obstacle_parameters(cur_obs_front - 0.02f, cur_obs_clear, cur_obs_len);
     robot.get_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Khoang cach vat can D_obs = %.2f m",
-                   cur_obs_front);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Obstacle Dist D_obs = %.2f m", cur_obs_front);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_B)) {
     robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear + 0.01f, cur_obs_len);
     robot.get_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Do rong ne suon Y_clear = %.2f m",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Lateral Clearance Y_clear = %.2f m",
                    cur_obs_clear);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_G)) {
     robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear - 0.01f, cur_obs_len);
     robot.get_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Do rong ne suon Y_clear = %.2f m",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Lateral Clearance Y_clear = %.2f m",
                    cur_obs_clear);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_N)) {
     robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len + 0.05f);
     robot.get_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Chieu dai cung ne L_chicane = %.2f m",
-                   cur_obs_len);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Chicane Length L_chicane = %.2f m", cur_obs_len);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_V)) {
     robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len - 0.05f);
     robot.get_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Chieu dai cung ne L_chicane = %.2f m",
-                   cur_obs_len);
+    (void)snprintf(toast_msg, toast_size, "TUNING: Chicane Length L_chicane = %.2f m", cur_obs_len);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_E)) {
     robot.set_tactical_speeds(cur_v_map + 0.10f, cur_v_sprint);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Map Speed V_map = %.2f m/s",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Map Speed V_map = %.2f m/s",
                    robot.get_config().profiler.safe_map_speed_mps);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_D)) {
     robot.set_tactical_speeds(cur_v_map - 0.10f, cur_v_sprint);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Map Speed V_map = %.2f m/s",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Map Speed V_map = %.2f m/s",
                    robot.get_config().profiler.safe_map_speed_mps);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_W)) {
     robot.set_tactical_speeds(cur_v_map, cur_v_sprint + 0.20f);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Sprint Speed V_sprint = %.2f m/s",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Sprint Speed V_sprint = %.2f m/s",
                    robot.get_config().profiler.max_straight_speed_mps);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_S)) {
     robot.set_tactical_speeds(cur_v_map, cur_v_sprint - 0.20f);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Sprint Speed V_sprint = %.2f m/s",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Sprint Speed V_sprint = %.2f m/s",
                    robot.get_config().profiler.max_straight_speed_mps);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_A)) {
     robot.set_profiler_dynamics(cur_accel + 0.5f, 4.5f, 0.8f);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Max Accel = %.1f m/s^2",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Max Accel = %.1f m/s²",
                    robot.get_config().profiler.max_accel_mps2);
     toast_timer = 2.5f;
   }
   if (IsKeyPressed(KEY_Z)) {
     robot.set_profiler_dynamics(cur_accel - 0.5f, 4.5f, 0.8f);
-    (void)snprintf(toast_msg, toast_size, "VI CHINH: Max Accel = %.1f m/s^2",
+    (void)snprintf(toast_msg, toast_size, "TUNING: Max Accel = %.1f m/s²",
                    robot.get_config().profiler.max_accel_mps2);
     toast_timer = 2.5f;
   }
@@ -322,9 +330,8 @@ void handle_camera_hotkeys(Rectangle view_rect, Camera2D& camera, float ui_scale
     state.is_auto_scale_cam = !state.is_auto_scale_cam;
     is_user_zoomed = false;
     follow_robot = false;
-    (void)snprintf(
-      toast_msg, toast_size, "AUTO-SCALE: %s",
-      state.is_auto_scale_cam ? "Kich hoat tu dong can chinh sa ban" : "Tat Auto-Scale");
+    (void)snprintf(toast_msg, toast_size, "AUTO-SCALE: %s",
+                   state.is_auto_scale_cam ? "Tracking camera active" : "Auto-scale disabled");
     toast_timer = 2.5f;
   }
 }
@@ -347,8 +354,8 @@ void handle_obstacle_mouse_drag(Vector2 mouse_world, std::vector<lf::sim::Obstac
       obstacles.push_back({mouse_world, 105.0f, 60.0f, 0.0f});
       dragged_obstacle_idx = static_cast<int>(obstacles.size()) - 1;
       drag_offset = Vector2{0.0f, 0.0f};
-      (void)snprintf(toast_msg, toast_size, "DAT VAT CAN: #%zu tai (%.0f, %.0f)", obstacles.size(),
-                     mouse_world.x, mouse_world.y);
+      (void)snprintf(toast_msg, toast_size, "OBSTACLE PLACED: #%zu at (%.0f, %.0f)",
+                     obstacles.size(), mouse_world.x, mouse_world.y);
       toast_timer = 2.0f;
     }
   }
@@ -368,7 +375,7 @@ void handle_obstacle_mouse_drag(Vector2 mouse_world, std::vector<lf::sim::Obstac
 
 void handle_obstacle_rotation(lf::sim::SimRobotState& state,
                               std::vector<lf::sim::Obstacle>& obstacles, float wheel,
-                              const lf::RobotCoordinator& robot, char* toast_msg, size_t toast_size,
+                              lf::RobotCoordinator& robot, char* toast_msg, size_t toast_size,
                               float& toast_timer) {
   if (state.hovered_obstacle_idx < 0 ||
       state.hovered_obstacle_idx >= static_cast<int>(obstacles.size())) {
@@ -394,7 +401,7 @@ void handle_obstacle_rotation(lf::sim::SimRobotState& state,
   }
 
   if (changed) {
-    (void)snprintf(toast_msg, toast_size, "XOAY VAT CAN #%d: Goc %.0f°",
+    (void)snprintf(toast_msg, toast_size, "ROTATE OBSTACLE #%d: Angle %.0f°",
                    state.hovered_obstacle_idx + 1, obs.angle_deg);
     toast_timer = 1.5f;
     recompute_racing_trajectory(robot, obstacles, state);
@@ -402,7 +409,7 @@ void handle_obstacle_rotation(lf::sim::SimRobotState& state,
 }
 
 void handle_mouse_interactions(Rectangle view_rect, Camera2D& camera, float ui_scale,
-                               const lf::RobotCoordinator& robot,
+                               lf::RobotCoordinator& robot,
                                std::vector<lf::sim::Obstacle>& obstacles,
                                lf::sim::SimRobotState& state, int& dragged_obstacle_idx,
                                Vector2& drag_offset, bool& follow_robot, bool& is_user_zoomed,
@@ -418,7 +425,7 @@ void handle_mouse_interactions(Rectangle view_rect, Camera2D& camera, float ui_s
 
   const Vector2 mouse_world = GetScreenToWorld2D(mouse_pos, camera);
 
-  // Kiem tra vat can dang duoc hover boi chuot
+  // Check if obstacle is hovered by mouse
   int hit_idx = -1;
   for (int i = static_cast<int>(obstacles.size()) - 1; i >= 0; --i) {
     if (Vector2Distance(mouse_world, obstacles.at(static_cast<size_t>(i)).pos) <= 60.0f) {
@@ -430,15 +437,15 @@ void handle_mouse_interactions(Rectangle view_rect, Camera2D& camera, float ui_s
 
   if (IsKeyPressed(KEY_O)) {
     obstacles.push_back({mouse_world, 105.0f, 60.0f, 0.0f});
-    (void)snprintf(toast_msg, toast_size, "DA THEM: Vat can #%zu tai (%.0f, %.0f)",
-                   obstacles.size(), mouse_world.x, mouse_world.y);
+    (void)snprintf(toast_msg, toast_size, "OBSTACLE ADDED: #%zu at (%.0f, %.0f)", obstacles.size(),
+                   mouse_world.x, mouse_world.y);
     toast_timer = 2.5f;
     recompute_racing_trajectory(robot, obstacles, state);
   }
 
   if (IsKeyPressed(KEY_X)) {
     obstacles.clear();
-    (void)snprintf(toast_msg, toast_size, "DA XOA: Toan bo vat can tren sa ban.");
+    (void)snprintf(toast_msg, toast_size, "CLEARED: All obstacles removed.");
     toast_timer = 2.5f;
     recompute_racing_trajectory(robot, obstacles, state);
   }
@@ -450,7 +457,7 @@ void handle_mouse_interactions(Rectangle view_rect, Camera2D& camera, float ui_s
     for (auto it = obstacles.begin(); it != obstacles.end(); ++it) {
       if (Vector2Distance(mouse_world, it->pos) <= 60.0f) {
         obstacles.erase(it);
-        (void)snprintf(toast_msg, toast_size, "DA XOA: Vat can duoi con tro chuot.");
+        (void)snprintf(toast_msg, toast_size, "CLEARED: Obstacle under cursor removed.");
         toast_timer = 2.0f;
         recompute_racing_trajectory(robot, obstacles, state);
         break;
@@ -477,54 +484,46 @@ void handle_mouse_interactions(Rectangle view_rect, Camera2D& camera, float ui_s
   }
 }
 
-void update_simulation(float dt, lf::RobotCoordinator& robot,
-                       lf::DifferentialDriveKinematics& kinematics, const Image& blurred_track,
-                       const std::vector<lf::sim::Obstacle>& obstacles,
-                       lf::sim::SimRobotState& state, lf::SensorData& in,
-                       lf::sim::TofHitPoints& hits, Vector2& l_origin, Vector2& r_origin,
-                       float& bar_center_x, float& bar_center_y, lf::RobotMode& prev_mode,
-                       char* toast_msg, size_t toast_size, float& toast_timer) {
-  in.dt = dt;
-  const float cos_th = std::cos(state.theta);
-  const float sin_th = std::sin(state.theta);
-
-  const float lookahead_mm = robot.get_config().kinematics.sensor_lookahead_m * 1000.0f;
-  bar_center_x = state.x + lookahead_mm * cos_th;
-  bar_center_y = state.y + lookahead_mm * sin_th;
+void compute_sensor_reflectivity(float bar_center_x, float bar_center_y, float sin_th, float cos_th,
+                                 const Image& blurred_track, const lf::LineSensorConfig& sensor_cfg,
+                                 lf::SensorData& in) {
+  constexpr std::array<std::array<float, 3>, 3> kKernelWeights = {
+    {{{0.06f, 0.14f, 0.06f}}, {{0.14f, 0.20f, 0.14f}}, {{0.06f, 0.14f, 0.06f}}},
+  };
 
   for (int i = 0; i < lf::LineSensorConfig::kSensorCount; ++i) {
-    const float offset_mm = robot.get_config().line_sensor.weights_mm.at(static_cast<size_t>(i));
+    const float offset_mm = sensor_cfg.weights_mm.at(static_cast<size_t>(i));
     const float sx = bar_center_x - offset_mm * sin_th;
     const float sy = bar_center_y + offset_mm * cos_th;
 
-    const int px = std::clamp(static_cast<int>(sx), 0, blurred_track.width - 1);
-    const int py = std::clamp(static_cast<int>(sy), 0, blurred_track.height - 1);
+    float total_reflectivity = 0.0f;
+    for (size_t r = 0; r < 3; ++r) {
+      const float dy = (static_cast<float>(r) - 1.0f) * 1.5f;
+      for (size_t c = 0; c < 3; ++c) {
+        const float dx = (static_cast<float>(c) - 1.0f) * 1.5f;
+        const int px = std::clamp(static_cast<int>(sx + dx), 0, blurred_track.width - 1);
+        const int py = std::clamp(static_cast<int>(sy + dy), 0, blurred_track.height - 1);
 
-    const Color c = GetImageColor(blurred_track, px, py);
-    const float brightness = static_cast<float>(c.r + c.g + c.b) / (3.0f * 255.0f);
-    in.ir_raw.at(static_cast<size_t>(i)) = 1.0f - brightness;
+        const Color pixel = GetImageColor(blurred_track, px, py);
+        const float brightness = static_cast<float>(pixel.r + pixel.g + pixel.b) / (3.0f * 255.0f);
+        total_reflectivity += (1.0f - brightness) * kKernelWeights.at(r).at(c);
+      }
+    }
+    in.ir_raw.at(static_cast<size_t>(i)) = total_reflectivity;
   }
+}
 
-  lf::sim::raycast_all_tof(state.x, state.y, state.theta, bar_center_x, bar_center_y, obstacles, in,
-                           hits, l_origin, r_origin);
-
-  in.enc_left_ticks = state.enc_l;
-  in.enc_right_ticks = state.enc_r;
-
-  lf::MotorCmd out{};
-  if (!state.is_paused) {
-    robot.update(in, out);
-    state.sim_time += dt;
-  }
-
-  // Phat hien ket thuc luot chay Run 1 hoac Run 2 de ghi nhan thoi gian
-  if (prev_mode == lf::RobotMode::kAutoTuning && robot.get_mode() == lf::RobotMode::kIdle) {
+void handle_mode_transition_toasts(lf::RobotCoordinator& robot, lf::RobotMode& prev_mode,
+                                   const std::vector<lf::sim::Obstacle>& obstacles,
+                                   lf::sim::SimRobotState& state, char* toast_msg,
+                                   size_t toast_size, float& toast_timer) {
+  if (prev_mode == lf::RobotMode::kAutoTune && robot.get_mode() == lf::RobotMode::kIdle) {
     float kp = 0.0f;
     float ki = 0.0f;
     float kd = 0.0f;
     robot.get_line_pid_gains(kp, ki, kd);
-    (void)snprintf(toast_msg, toast_size, "AUTO-TUNE XONG: Kp=%.4f, Ki=%.5f, Kd=%.4f (Da luu)", kp,
-                   ki, kd);
+    (void)snprintf(toast_msg, toast_size,
+                   "AUTO-TUNE SUCCESS: Kp=%.4f, Kd=%.4f (Applied!). Ready for Run 1.", kp, kd);
     toast_timer = 5.0f;
   }
   if (prev_mode == lf::RobotMode::kRun1Map && robot.get_mode() == lf::RobotMode::kIdle) {
@@ -535,7 +534,7 @@ void update_simulation(float dt, lf::RobotCoordinator& robot,
       recompute_racing_trajectory(robot, obstacles, state);
     }
     (void)snprintf(toast_msg, toast_size,
-                   "HOAN THANH RUN 1: %05.2fs. Da luu vet chay va toi uu quy dao C2!",
+                   "RUN 1 COMPLETE: %05.2fs. Saved trail & optimized C2 trajectory!",
                    state.run1_time_s);
     toast_timer = 4.0f;
   }
@@ -544,11 +543,95 @@ void update_simulation(float dt, lf::RobotCoordinator& robot,
     state.has_run2_data = true;
     const float delta_s = state.run2_time_s - state.run1_time_s;
     const float pct = (state.run1_time_s > 0.01f) ? ((delta_s / state.run1_time_s) * 100.0f) : 0.0f;
-    (void)snprintf(toast_msg, toast_size, "HOAN THANH RUN 2: %05.2fs [Delta: %+.2fs (%+.1f%%)]",
+    (void)snprintf(toast_msg, toast_size, "RUN 2 COMPLETE: %05.2fs [Delta: %+.2fs (%+.1f%%)]",
                    state.run2_time_s, delta_s, pct);
     toast_timer = 5.0f;
   }
   prev_mode = robot.get_mode();
+}
+
+bool check_and_handle_collision(lf::sim::SimRobotState& state, lf::RobotCoordinator& robot,
+                                const std::vector<lf::sim::Obstacle>& obstacles, char* toast_msg,
+                                size_t toast_size, float& toast_timer) {
+  if (state.is_paused || robot.get_mode() == lf::RobotMode::kIdle) {
+    return false;
+  }
+
+  std::vector<lf::ObstacleGeometry> obs_geoms;
+  obs_geoms.reserve(obstacles.size());
+  for (const auto& obs : obstacles) {
+    obs_geoms.push_back({
+      obs.pos.x,
+      obs.pos.y,
+      obs.width_mm,
+      obs.height_mm,
+      obs.angle_deg,
+    });
+  }
+
+  const int hit_idx = lf::check_robot_collision_any(
+    state.x, state.y, state.theta, lf::sim::kRobotLengthMm, lf::sim::kRobotWidthMm, obs_geoms);
+  if (hit_idx < 0) {
+    return false;
+  }
+
+  state.is_crashed = true;
+  state.crashed_obstacle_idx = hit_idx;
+  state.left_pwm = 0.0f;
+  state.right_pwm = 0.0f;
+  state.v = 0.0f;
+  state.w = 0.0f;
+  state.prev_v = 0.0f;
+  robot.report_collision(hit_idx);
+  (void)snprintf(toast_msg, toast_size,
+                 "CRASH DETECTED! Robot hit Obstacle #%d -> Immediate FAIL / Emergency Stop.",
+                 hit_idx + 1);
+  toast_timer = 5.0f;
+  return true;
+}
+
+void update_simulation(float dt, lf::RobotCoordinator& robot,
+                       const lf::DifferentialDriveKinematics& kinematics,
+                       const Image& blurred_track, const std::vector<lf::sim::Obstacle>& obstacles,
+                       lf::sim::SimRobotState& state, lf::SensorData& in,
+                       lf::sim::TofHitPoints& hits, Vector2& l_origin, Vector2& r_origin,
+                       float& bar_center_x, float& bar_center_y, lf::RobotMode& prev_mode,
+                       char* toast_msg, size_t toast_size, float& toast_timer) {
+  if (state.is_crashed) {
+    state.left_pwm = 0.0f;
+    state.right_pwm = 0.0f;
+    state.v = 0.0f;
+    state.w = 0.0f;
+    state.prev_v = 0.0f;
+    return;
+  }
+
+  in.dt = dt;
+  const float cos_th = std::cos(state.theta);
+  const float sin_th = std::sin(state.theta);
+
+  const float lookahead_mm = robot.get_config().kinematics.sensor_lookahead_m * 1000.0f;
+  bar_center_x = state.x + lookahead_mm * cos_th;
+  bar_center_y = state.y + lookahead_mm * sin_th;
+
+  compute_sensor_reflectivity(bar_center_x, bar_center_y, sin_th, cos_th, blurred_track,
+                              robot.get_config().line_sensor, in);
+
+  lf::sim::raycast_all_tof(state.x, state.y, state.theta, bar_center_x, bar_center_y, obstacles, in,
+                           hits, l_origin, r_origin,
+                           robot.get_config().obstacle.front_detect_dist_m, 0.20f);
+
+  in.enc_left_ticks = state.enc_l;
+  in.enc_right_ticks = state.enc_r;
+
+  lf::MotorCmd out{};
+  if (!state.is_paused) {
+    robot.update(in, out);
+    state.sim_time += dt;
+  }
+
+  handle_mode_transition_toasts(robot, prev_mode, obstacles, state, toast_msg, toast_size,
+                                toast_timer);
 
   state.left_pwm = out.left_pwm;
   state.right_pwm = out.right_pwm;
@@ -565,14 +648,24 @@ void update_simulation(float dt, lf::RobotCoordinator& robot,
   const auto twist = kinematics.forward(v_l, v_r);
   state.v = twist.linear_v_mps;
   state.w = twist.angular_w_radps;
+  state.lateral_accel_mps2 = state.v * state.w;
+  state.longitudinal_accel_mps2 = (dt > 1e-4f) ? ((state.v - state.prev_v) / dt) : 0.0f;
+  state.prev_v = state.v;
 
+  state.wheel_dist_l_m += v_l * dt;
+  state.wheel_dist_r_m += v_r * dt;
   const float m_per_tick = robot.get_config().kinematics.meters_per_tick();
-  state.enc_l += static_cast<int32_t>((v_l * dt) / m_per_tick);
-  state.enc_r += static_cast<int32_t>((v_r * dt) / m_per_tick);
+  state.enc_l = static_cast<int32_t>(std::round(state.wheel_dist_l_m / m_per_tick));
+  state.enc_r = static_cast<int32_t>(std::round(state.wheel_dist_r_m / m_per_tick));
 
-  state.x += state.v * cos_th * dt * 1000.0f;
-  state.y += state.v * sin_th * dt * 1000.0f;
+  const float mid_th = state.theta + 0.5f * state.w * dt;
+  state.x += state.v * std::cos(mid_th) * dt * 1000.0f;
+  state.y += state.v * std::sin(mid_th) * dt * 1000.0f;
   state.theta += state.w * dt;
+
+  if (check_and_handle_collision(state, robot, obstacles, toast_msg, toast_size, toast_timer)) {
+    return;
+  }
 
   const float d_sq = state.trail.empty()
                        ? 100.0f
@@ -654,9 +747,14 @@ void update_telemetry_ground_station(lf::sim::TelemetryReceiver& telemetry_recei
     auto& tel = robot.get_telemetry_mut();
     tel.centroid_pos_mm = pkt.centroid_pos_mm;
     tel.line_lost = (pkt.line_lost != 0);
+    tel.collision = (pkt.collision != 0);
+    tel.obstacle.collision = (pkt.collision != 0);
     tel.battery_v = pkt.battery_voltage_v;
     tel.mode = static_cast<lf::RobotMode>(pkt.mode);
-    tel.fsm_state = pkt.fsm_state;
+    tel.bypass_state = pkt.bypass_state;
+    if (pkt.collision != 0) {
+      state.is_crashed = true;
+    }
 
     if (is_telem_first_pkt) {
       prev_telem_enc_l = pkt.enc_left_ticks;
@@ -696,6 +794,169 @@ void update_telemetry_ground_station(lf::sim::TelemetryReceiver& telemetry_recei
   state.sim_time += dt;
 }
 
+bool load_tactical_fonts(Font& font_bold, Font& font_mono) {
+  bool has_custom = false;
+  if (FileExists("/usr/share/fonts/liberation/LiberationSans-Bold.ttf")) {
+    font_bold = LoadFontEx("/usr/share/fonts/liberation/LiberationSans-Bold.ttf", 80, nullptr, 0);
+    SetTextureFilter(font_bold.texture, TEXTURE_FILTER_BILINEAR);
+    has_custom = true;
+  }
+  if (FileExists("/usr/share/fonts/liberation/LiberationMono-Bold.ttf")) {
+    font_mono = LoadFontEx("/usr/share/fonts/liberation/LiberationMono-Bold.ttf", 72, nullptr, 0);
+    SetTextureFilter(font_mono.texture, TEXTURE_FILTER_BILINEAR);
+    has_custom = true;
+  }
+  return has_custom;
+}
+
+void update_frame_timers(float dt, float& toast_timer, lf::sim::SimRobotState& state) {
+  if (toast_timer > 0.0f) {
+    toast_timer -= dt;
+  }
+  if (state.key_flash_timer > 0.0f) {
+    state.key_flash_timer -= dt;
+  }
+  const int key_pressed = GetKeyPressed();
+  if (key_pressed != 0) {
+    state.last_pressed_key = key_pressed;
+    state.key_flash_timer = 0.25f;
+  }
+}
+
+void run_simulation_step(
+  lf::sim::SimRobotState& state, lf::sim::TelemetryReceiver& telemetry_receiver,
+  lf::RobotCoordinator& robot, const lf::DifferentialDriveKinematics& kinematics,
+  const Image& blurred_track, const std::vector<lf::sim::Obstacle>& obstacles, lf::SensorData& in,
+  lf::sim::TofHitPoints& hits, Vector2& l_origin, Vector2& r_origin, float& bar_center_x,
+  float& bar_center_y, lf::RobotMode& prev_robot_mode, char* toast_buf, size_t toast_buf_len,
+  float& toast_timer, float dt, int32_t& prev_telem_enc_l, int32_t& prev_telem_enc_r,
+  bool& is_telem_first_pkt, float& physics_accumulator) {
+  if (state.is_telemetry_mode) {
+    update_telemetry_ground_station(telemetry_receiver, robot, state, in, dt, prev_telem_enc_l,
+                                    prev_telem_enc_r, is_telem_first_pkt);
+    const float lookahead_mm = robot.get_config().kinematics.sensor_lookahead_m * 1000.0f;
+    bar_center_x = state.x + lookahead_mm * std::cos(state.theta);
+    bar_center_y = state.y + lookahead_mm * std::sin(state.theta);
+    return;
+  }
+
+  is_telem_first_pkt = true;
+  if (state.is_paused) {
+    update_simulation(0.0f, robot, kinematics, blurred_track, obstacles, state, in, hits, l_origin,
+                      r_origin, bar_center_x, bar_center_y, prev_robot_mode, toast_buf,
+                      toast_buf_len, toast_timer);
+    return;
+  }
+
+  constexpr float kSubStepDt = 0.002f;  // 500 Hz MCU physical control step
+  physics_accumulator += dt;
+  while (physics_accumulator >= kSubStepDt) {
+    update_simulation(kSubStepDt, robot, kinematics, blurred_track, obstacles, state, in, hits,
+                      l_origin, r_origin, bar_center_x, bar_center_y, prev_robot_mode, toast_buf,
+                      toast_buf_len, toast_timer);
+    physics_accumulator -= kSubStepDt;
+  }
+}
+
+void handle_gui_action(lf::sim::GuiAction gui_act, lf::RobotCoordinator& robot,
+                       std::vector<lf::sim::Obstacle>& obstacles, lf::sim::SimRobotState& state,
+                       bool& follow_robot, bool& is_user_zoomed, char* toast_buf,
+                       size_t toast_buf_len, float& toast_timer) {
+  switch (gui_act) {
+    case lf::sim::GuiAction::kAutoTune: {
+      robot.set_mode(lf::RobotMode::kAutoTune);
+      reset_sim_pose(state, false);
+      (void)snprintf(toast_buf, toast_buf_len,
+                     "AUTO-TUNE ACTIVE: Åström–Hägglund Relay limit cycle running...");
+      toast_timer = 3.5f;
+      break;
+    }
+    case lf::sim::GuiAction::kRun1Map: {
+      robot.set_mode(lf::RobotMode::kRun1Map);
+      reset_sim_pose(state, false);
+      (void)snprintf(toast_buf, toast_buf_len, "RUN 1 ACTIVE: Map Scanning & Path Learning");
+      toast_timer = 2.5f;
+      break;
+    }
+    case lf::sim::GuiAction::kRun2Sprint: {
+      if (state.unoptimized_trail.empty() && state.trail.size() > 10) {
+        state.unoptimized_trail.assign(state.trail.begin(), state.trail.end());
+        state.run1_time_s = state.sim_time;
+        state.has_run1_data = true;
+      }
+      recompute_racing_trajectory(robot, obstacles, state);
+      robot.set_mode(lf::RobotMode::kRun2Sprint);
+      reset_sim_pose(state, false);
+      (void)snprintf(toast_buf, toast_buf_len, "RUN 2 ACTIVE: Sprint Trajectory");
+      toast_timer = 2.5f;
+      break;
+    }
+    case lf::sim::GuiAction::kTogglePause:
+      state.is_paused = !state.is_paused;
+      break;
+    case lf::sim::GuiAction::kResetPose:
+      reset_sim_pose(state, true);
+      robot.reset_pose();
+      break;
+    case lf::sim::GuiAction::kClearObstacles:
+      obstacles.clear();
+      recompute_racing_trajectory(robot, obstacles, state);
+      (void)snprintf(toast_buf, toast_buf_len, "CLEARED ALL OBSTACLES");
+      toast_timer = 2.0f;
+      break;
+    case lf::sim::GuiAction::kFitArena:
+      follow_robot = false;
+      is_user_zoomed = false;
+      break;
+    case lf::sim::GuiAction::kToggleFollowCam:
+      follow_robot = !follow_robot;
+      break;
+    case lf::sim::GuiAction::kCommitC2: {
+      if (state.trail.size() <= 10) {
+        break;
+      }
+      state.unoptimized_trail.assign(state.trail.begin(), state.trail.end());
+      state.run1_time_s = state.sim_time;
+      state.has_run1_data = true;
+      recompute_racing_trajectory(robot, obstacles, state);
+      (void)snprintf(toast_buf, toast_buf_len, "COMMITTED C2 RACING TRAJECTORY");
+      toast_timer = 2.5f;
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+void render_canvas_hover(Vector2 mouse_pos, float view_w, const Camera2D& camera,
+                         const lf::sim::SimRobotState& state, float ui_scale, const Font& font_bold,
+                         const Font& font_mono) {
+  if (mouse_pos.x >= view_w || state.planned_trajectory.empty()) {
+    return;
+  }
+
+  const Vector2 mouse_w = GetScreenToWorld2D(mouse_pos, camera);
+  float closest_d_sq = 80.0f * 80.0f;
+  int closest_idx = -1;
+  for (size_t i = 0; i < state.planned_trajectory.size(); ++i) {
+    const float dx = state.planned_trajectory.at(i).x_mm - mouse_w.x;
+    const float dy = state.planned_trajectory.at(i).y_mm - mouse_w.y;
+    const float d2 = dx * dx + dy * dy;
+    if (d2 < closest_d_sq) {
+      closest_d_sq = d2;
+      closest_idx = static_cast<int>(i);
+    }
+  }
+
+  if (closest_idx < 0) {
+    return;
+  }
+
+  lf::sim::draw_canvas_hover_telemetry(
+    mouse_pos, state.planned_trajectory.at(static_cast<size_t>(closest_idx)),
+    static_cast<size_t>(closest_idx), ui_scale, font_bold, font_mono);
+}
+
 }  // namespace
 
 int main() {
@@ -706,23 +967,13 @@ int main() {
 
   Font font_bold = GetFontDefault();
   Font font_mono = GetFontDefault();
-  bool has_custom_fonts = false;
-  if (FileExists("/usr/share/fonts/liberation/LiberationSans-Bold.ttf")) {
-    font_bold = LoadFontEx("/usr/share/fonts/liberation/LiberationSans-Bold.ttf", 80, nullptr, 0);
-    SetTextureFilter(font_bold.texture, TEXTURE_FILTER_BILINEAR);
-    has_custom_fonts = true;
-  }
-  if (FileExists("/usr/share/fonts/liberation/LiberationMono-Bold.ttf")) {
-    font_mono = LoadFontEx("/usr/share/fonts/liberation/LiberationMono-Bold.ttf", 72, nullptr, 0);
-    SetTextureFilter(font_mono.texture, TEXTURE_FILTER_BILINEAR);
-    has_custom_fonts = true;
-  }
+  const bool has_custom_fonts = load_tactical_fonts(font_bold, font_mono);
 
   const lf::RobotConfig config{};
   lf::RobotCoordinator robot(config);
   robot.init();
 
-  lf::DifferentialDriveKinematics kinematics(config.kinematics.wheel_base_m);
+  const lf::DifferentialDriveKinematics kinematics(config.kinematics.wheel_base_m);
 
   lf::sim::SimRobotState state{};
   std::vector<lf::sim::Obstacle> obstacles = {
@@ -731,9 +982,10 @@ int main() {
 
   Camera2D camera{};
   camera.target = Vector2{lf::sim::kTrackWidthMm * 0.5f, lf::sim::kTrackHeightMm * 0.5f};
-  camera.offset =
-    Vector2{(static_cast<float>(GetScreenWidth()) - lf::sim::kBaseSidebarWidth) * 0.5f,
-            static_cast<float>(GetScreenHeight()) * 0.5f};
+  camera.offset = Vector2{
+    (static_cast<float>(GetScreenWidth()) - lf::sim::kBaseSidebarWidth) * 0.5f,
+    static_cast<float>(GetScreenHeight()) * 0.5f,
+  };
   camera.rotation = 0.0f;
   camera.zoom = 0.58f;
 
@@ -744,12 +996,12 @@ int main() {
 
   std::array<char, 128> toast_msg{};
   (void)snprintf(toast_msg.data(), toast_msg.size(),
-                 "CHAO MUNG: Bam [1] de hoc ban do, [2] de chay Sprint quy dao toi uu!");
+                 "READY: Press [1] for Map Learning, [2] for C2 Racing Sprint.");
   float toast_timer = 4.0f;
 
   Image raw_track = LoadImage("assets/track.png");
   if (raw_track.data == nullptr) {
-    TraceLog(LOG_ERROR, "Khong tim thay assets/track.png! Hay chay generate_track.py.");
+    TraceLog(LOG_ERROR, "assets/track.png not found! Run tools/generate_track.py.");
     CloseWindow();
     return 1;
   }
@@ -766,6 +1018,7 @@ int main() {
   int32_t prev_telem_enc_l = 0;
   int32_t prev_telem_enc_r = 0;
   bool is_telem_first_pkt = true;
+  float physics_accumulator = 0.0f;
 
   while (!WindowShouldClose()) {
     const int screen_w = GetScreenWidth();
@@ -789,6 +1042,7 @@ int main() {
     if (dt > 0.05f) {
       dt = 0.016f;
     }
+    update_frame_timers(dt, toast_timer, state);
 
     lf::SensorData in{};
     lf::sim::TofHitPoints hits{};
@@ -797,18 +1051,10 @@ int main() {
     float bar_center_x = 0.0f;
     float bar_center_y = 0.0f;
 
-    if (state.is_telemetry_mode) {
-      update_telemetry_ground_station(telemetry_receiver, robot, state, in, dt, prev_telem_enc_l,
-                                      prev_telem_enc_r, is_telem_first_pkt);
-      const float lookahead_mm = robot.get_config().kinematics.sensor_lookahead_m * 1000.0f;
-      bar_center_x = state.x + lookahead_mm * std::cos(state.theta);
-      bar_center_y = state.y + lookahead_mm * std::sin(state.theta);
-    } else {
-      is_telem_first_pkt = true;
-      update_simulation(dt, robot, kinematics, blurred_track, obstacles, state, in, hits, l_origin,
-                        r_origin, bar_center_x, bar_center_y, prev_robot_mode, toast_msg.data(),
-                        toast_msg.size(), toast_timer);
-    }
+    run_simulation_step(state, telemetry_receiver, robot, kinematics, blurred_track, obstacles, in,
+                        hits, l_origin, r_origin, bar_center_x, bar_center_y, prev_robot_mode,
+                        toast_msg.data(), toast_msg.size(), toast_timer, dt, prev_telem_enc_l,
+                        prev_telem_enc_r, is_telem_first_pkt, physics_accumulator);
 
     // Render Scene
     BeginDrawing();
@@ -823,47 +1069,40 @@ int main() {
     lf::sim::draw_robot_trail(state.trail, robot.get_mode());
     lf::sim::draw_robot_chassis(state.x, state.y, state.theta, bar_center_x, bar_center_y,
                                 robot.get_config().kinematics.wheel_base_m, in,
-                                robot.get_telemetry(), robot.get_config().line_sensor.weights_mm);
+                                robot.get_telemetry(), robot.get_config().line_sensor.weights_mm,
+                                state.is_crashed);
     const float clearance_r = robot.get_config().environment.clearance_radius_mm();
-    lf::sim::draw_obstacles(obstacles, state.hovered_obstacle_idx, clearance_r);
-    lf::sim::draw_tof_beams(bar_center_x, bar_center_y, l_origin, r_origin, state.theta, hits, in);
+    lf::sim::draw_obstacles(obstacles, state.hovered_obstacle_idx, clearance_r,
+                            state.crashed_obstacle_idx);
+    lf::sim::draw_tof_beams(bar_center_x, bar_center_y, l_origin, r_origin, state.theta, hits, in,
+                            robot.get_config().obstacle.front_detect_dist_m);
 
     EndMode2D();
     EndScissorMode();
 
-    // Render HUD Sidebar
-    lf::sim::draw_sidebar_background(sb_x, sb_w, screen_h, ui_scale);
-
-    const float pad_x = 24.0f * ui_scale;
-    const float card_w = sb_w - 2.0f * pad_x;
-    const float half_w = (card_w - 12.0f * ui_scale) * 0.5f;
-
-    lf::sim::draw_header_card(sb_x, pad_x, card_w, ui_scale, state.sim_time, state.is_paused,
-                              robot.get_mode(), state.is_telemetry_mode, state.packets_received,
-                              font_bold, font_mono);
-    lf::sim::draw_telemetry_card(sb_x, pad_x, half_w, ui_scale, state.v,
-                                 robot.get_config().profiler.max_straight_speed_mps,
-                                 robot.get_telemetry(), font_bold);
-    lf::sim::draw_centroid_card(sb_x, pad_x, card_w, ui_scale, robot.get_telemetry(), font_bold);
-    lf::sim::draw_sensors_card(sb_x, pad_x, card_w, ui_scale, in, font_bold);
-    lf::sim::draw_motor_pwm_card(sb_x, pad_x, card_w, ui_scale, state.left_pwm, state.right_pwm,
-                                 robot.get_telemetry(), font_bold, font_mono);
+    // Render Hallmark HUD Sidebar
+    const Vector2 mouse_pos = GetMousePosition();
+    const bool mouse_down = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    const bool mouse_pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
     const float hov_angle =
       (state.hovered_obstacle_idx >= 0 &&
        state.hovered_obstacle_idx < static_cast<int>(obstacles.size()))
         ? obstacles.at(static_cast<size_t>(state.hovered_obstacle_idx)).angle_deg
         : -1.0f;
-    lf::sim::draw_tof_card(sb_x, pad_x, card_w, ui_scale, in, obstacles.size(), hov_angle,
-                           font_bold, font_mono);
-    lf::sim::draw_lap_comparison_card(sb_x, pad_x, card_w, ui_scale, state, font_bold, font_mono);
-    lf::sim::draw_tactical_card(sb_x, pad_x, card_w, ui_scale, robot, font_bold, font_mono);
 
-    if (toast_timer > 0.0f) {
-      lf::sim::draw_toast_notification(sb_x, pad_x, card_w, ui_scale, toast_msg.data(), font_bold);
+    const auto hud_res = lf::sim::draw_hud_sidebar(
+      sb_x, sb_w, view_h, ui_scale, robot, in, state, obstacles.size(), hov_angle, mouse_pos,
+      mouse_down, mouse_pressed, follow_robot, toast_msg.data(), toast_timer, font_bold, font_mono);
+
+    if (hud_res.tactical_changed) {
+      recompute_racing_trajectory(robot, obstacles, state);
     }
 
-    lf::sim::draw_controls_card(sb_x, pad_x, card_w, view_h, ui_scale, follow_robot, font_bold);
+    handle_gui_action(hud_res.action, robot, obstacles, state, follow_robot, is_user_zoomed,
+                      toast_msg.data(), toast_msg.size(), toast_timer);
+
+    render_canvas_hover(mouse_pos, view_w, camera, state, ui_scale, font_bold, font_mono);
 
     EndDrawing();
   }
