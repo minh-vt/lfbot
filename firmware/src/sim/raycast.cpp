@@ -129,13 +129,17 @@ void raycast_all_tof(float robot_x, float robot_y, float robot_theta, float bar_
   in.tof_front_m = raycast_obstacle_distance(Vector2{bar_center_x, bar_center_y}, robot_theta,
                                              kToFFoVRad, front_max_mm, obstacles, &hits.front);
 
-  out_l_origin = Vector2{robot_x - (kRobotWidthMm * 0.45f) * (-sin_th),
-                         robot_y - (kRobotWidthMm * 0.45f) * cos_th};
+  out_l_origin = Vector2{
+    robot_x - (kRobotWidthMm * 0.45f) * (-sin_th),
+    robot_y - (kRobotWidthMm * 0.45f) * cos_th,
+  };
   in.tof_left_m = raycast_obstacle_distance(out_l_origin, robot_theta - 1.5707963f, kToFFoVRad,
                                             side_max_mm, obstacles, &hits.left);
 
-  out_r_origin = Vector2{robot_x + (kRobotWidthMm * 0.45f) * (-sin_th),
-                         robot_y + (kRobotWidthMm * 0.45f) * cos_th};
+  out_r_origin = Vector2{
+    robot_x + (kRobotWidthMm * 0.45f) * (-sin_th),
+    robot_y + (kRobotWidthMm * 0.45f) * cos_th,
+  };
   in.tof_right_m = raycast_obstacle_distance(out_r_origin, robot_theta + 1.5707963f, kToFFoVRad,
                                              side_max_mm, obstacles, &hits.right);
 }

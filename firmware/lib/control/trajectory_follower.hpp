@@ -60,6 +60,8 @@ public:
   float evasion_origin_th_ = 0.0f;
   float evasion_side_sign_ = 1.0f;
   float evasion_cooldown_s_ = 0.0f;
+  float current_bypass_length_m_ = 0.82f;
+  float current_bypass_speed_mps_ = 0.45f;
   float cross_track_error_m_ = 0.0f;
   float heading_error_rad_ = 0.0f;
 };

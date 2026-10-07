@@ -39,9 +39,9 @@ lint-fix:
 compiledb:
     cd firmware && pio run -e sim -t compiledb
 
-# Sinh sa ban procedural generation (vd: just track --complexity 5 --seed 42)
-track *args:
-    python3 firmware/assets/generate_track.py {{ args }}
+# Chuan hoa sa ban tu anh thuc te AI (Vong loai 6000x1500, Chung ket 10000x1500)
+track:
+    python3 tools/normalize_ai_tracks.py
 
 # Nap chuong trinh xuong chip ESP32-S3
 upload:

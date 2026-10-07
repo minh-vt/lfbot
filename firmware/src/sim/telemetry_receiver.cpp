@@ -32,7 +32,9 @@ bool TelemetryReceiver::open(uint16_t port) {
   // Thiet lap socket o che do non-blocking
   const int flags = fcntl(socket_fd_, F_GETFL, 0);
   if (flags >= 0) {
-    (void)fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK);
+    (void)fcntl(
+      socket_fd_, F_SETFL,
+      static_cast<int>(static_cast<unsigned int>(flags) | static_cast<unsigned int>(O_NONBLOCK)));
   }
 
   sockaddr_in addr{};

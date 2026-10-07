@@ -7,6 +7,7 @@
 #include <iostream>
 
 #include "config/constants.hpp"
+#include "math/collision.hpp"
 #include "track/trajectory_planner.hpp"
 
 namespace lf::sim {
@@ -14,7 +15,8 @@ namespace lf::sim {
 namespace {
 
 constexpr std::array<std::array<float, 3>, 3> kKernelWeights = {
-  {{{0.06f, 0.14f, 0.06f}}, {{0.14f, 0.20f, 0.14f}}, {{0.06f, 0.14f, 0.06f}}}};
+  {{{0.06f, 0.14f, 0.06f}}, {{0.14f, 0.20f, 0.14f}}, {{0.06f, 0.14f, 0.06f}}},
+};
 
 }  // namespace
 
@@ -40,6 +42,14 @@ bool SimEngine::load_track(const char* image_path) {
 
   Image raw = LoadImage(image_path);
   if (raw.data == nullptr) {
+    const std::string p(image_path);
+    if (p.rfind("assets/", 0) == 0) {
+      raw = LoadImage(("firmware/" + p).c_str());
+    } else if (p.rfind("firmware/assets/", 0) == 0) {
+      raw = LoadImage(p.substr(9).c_str());
+    }
+  }
+  if (raw.data == nullptr) {
     return false;
   }
 
@@ -48,7 +58,27 @@ bool SimEngine::load_track(const char* image_path) {
   ImageBlurGaussian(&blurred_track_, 2);
   UnloadImage(raw);
 
+  track_width_mm_ = static_cast<float>(blurred_track_.width);
+  track_height_mm_ = static_cast<float>(blurred_track_.height);
+  arbiter_.set_arena_boundaries(-50.0f, track_width_mm_ + 50.0f, -50.0f, track_height_mm_ + 50.0f);
+
   track_loaded_ = true;
+  return true;
+}
+
+bool SimEngine::load_manifest(const TrackManifest& manifest) {
+  manifest_ = manifest;
+  if (!load_track(manifest.image_path.c_str())) {
+    return false;
+  }
+  set_obstacles(manifest.obstacles);
+  arbiter_.set_arena_boundaries(-50.0f, manifest.arena_width_mm + 50.0f, -50.0f,
+                                manifest.arena_height_mm + 50.0f);
+  arbiter_.set_finish_box(manifest.finish_box);
+  arbiter_.set_sector_gates({});
+  robot_.set_min_finish_arm_dist(manifest.min_finish_arm_dist_m);
+  const float th_rad = manifest.start_theta_deg * (constants::kPi / 180.0f);
+  reset_pose(RobotMode::kIdle, true, manifest.start_x, manifest.start_y, th_rad);
   return true;
 }
 
@@ -57,9 +87,15 @@ void SimEngine::set_obstacles(const std::vector<Obstacle>& obstacles) {
 }
 
 void SimEngine::reset_pose(RobotMode mode, bool clear_map) {
-  state_.x = kStartPosX;
-  state_.y = kStartPosY;
-  state_.theta = 0.0f;
+  const float th_rad = manifest_.start_theta_deg * (constants::kPi / 180.0f);
+  reset_pose(mode, clear_map, manifest_.start_x, manifest_.start_y, th_rad);
+}
+
+void SimEngine::reset_pose(RobotMode mode, bool clear_map, float start_x, float start_y,
+                           float start_theta) {
+  state_.x = start_x;
+  state_.y = start_y;
+  state_.theta = start_theta;
   state_.v = 0.0f;
   state_.w = 0.0f;
   state_.left_pwm = 0.0f;
@@ -98,6 +134,10 @@ void SimEngine::reset_pose(RobotMode mode, bool clear_map) {
 }
 
 void SimEngine::recompute_racing_trajectory() {
+  recompute_racing_trajectory(manifest_.start_x, manifest_.start_y);
+}
+
+void SimEngine::recompute_racing_trajectory(float start_x, float start_y) {
   if (state_.unoptimized_trail.size() < 10) {
     return;
   }
@@ -120,8 +160,8 @@ void SimEngine::recompute_racing_trajectory() {
   // Chuyen toa do arena frame sang robot local odometry frame
   std::vector<TrajectoryPoint> local_traj = state_.planned_trajectory;
   for (auto& pt : local_traj) {
-    pt.x_mm -= kStartPosX;
-    pt.y_mm -= kStartPosY;
+    pt.x_mm -= start_x;
+    pt.y_mm -= start_y;
   }
   robot_.set_racing_trajectory(local_traj);
   arbiter_.generate_gates_from_centerline(state_.planned_trajectory, 4);
@@ -160,10 +200,10 @@ void SimEngine::sample_ir_sensors(float bar_center_x, float bar_center_y, float 
 
 void SimEngine::check_obstacle_collisions(SimStepResult& result) {
   const float clearance_radius = robot_.get_config().environment.clearance_radius_mm();
-  constexpr float kPhysicalContactRadius = 129.5f;  // R_obs (60.5) + W_robot / 2 (69.0)
 
   float min_dist = 9999.0f;
   int nearest_idx = -1;
+  bool is_collided = false;
 
   for (size_t i = 0; i < obstacles_.size(); ++i) {
     const auto& obs = obstacles_.at(i);
@@ -175,12 +215,19 @@ void SimEngine::check_obstacle_collisions(SimStepResult& result) {
       min_dist = dist;
       nearest_idx = static_cast<int>(i);
     }
+
+    const ObstacleGeometry geom{obs.pos.x, obs.pos.y, obs.width_mm, obs.height_mm, obs.angle_deg};
+    if (check_robot_obstacle_collision(state_.x, state_.y, state_.theta, 150.0f,
+                                       robot_.get_config().environment.robot_width_mm, geom)) {
+      is_collided = true;
+      nearest_idx = static_cast<int>(i);
+    }
   }
 
   result.min_obs_dist_mm = min_dist;
   min_obs_dist_mm_ = std::min(min_dist, min_obs_dist_mm_);
 
-  if (min_dist < kPhysicalContactRadius) {
+  if (is_collided) {
     result.collision = true;
     state_.is_crashed = true;
     state_.crashed_obstacle_idx = nearest_idx;
@@ -351,6 +398,76 @@ SimStepResult SimEngine::step(float dt) {
   return result;
 }
 
+void SimEngine::update_from_telemetry(const TelemetryPacket& pkt, float dt, int32_t& prev_enc_l,
+                                      int32_t& prev_enc_r, bool& is_first_pkt) {
+  state_.packets_received++;
+  state_.left_pwm = pkt.left_pwm;
+  state_.right_pwm = pkt.right_pwm;
+  state_.enc_l = pkt.enc_left_ticks;
+  state_.enc_r = pkt.enc_right_ticks;
+
+  in_.ir_raw = pkt.ir_raw;
+  in_.tof_front_m = pkt.tof_front_m;
+  in_.tof_left_m = pkt.tof_left_m;
+  in_.tof_right_m = pkt.tof_right_m;
+  in_.enc_left_ticks = pkt.enc_left_ticks;
+  in_.enc_right_ticks = pkt.enc_right_ticks;
+
+  auto& tel = robot_.get_telemetry_mut();
+  tel.centroid_pos_mm = pkt.centroid_pos_mm;
+  tel.line_lost = (pkt.line_lost != 0);
+  tel.battery_v = pkt.battery_voltage_v;
+  tel.mode = static_cast<RobotMode>(pkt.mode);
+  tel.bypass_state = pkt.bypass_state;
+  tel.collision = (pkt.collision != 0);
+
+  if (is_first_pkt) {
+    prev_enc_l = pkt.enc_left_ticks;
+    prev_enc_r = pkt.enc_right_ticks;
+    is_first_pkt = false;
+  } else {
+    const int32_t d_l = pkt.enc_left_ticks - prev_enc_l;
+    const int32_t d_r = pkt.enc_right_ticks - prev_enc_r;
+    prev_enc_l = pkt.enc_left_ticks;
+    prev_enc_r = pkt.enc_right_ticks;
+
+    const float m_per_tick = robot_.get_config().kinematics.meters_per_tick();
+    const float dist_l = static_cast<float>(d_l) * m_per_tick;
+    const float dist_r = static_cast<float>(d_r) * m_per_tick;
+    state_.wheel_dist_l_m += dist_l;
+    state_.wheel_dist_r_m += dist_r;
+
+    const float ds_m = 0.5f * (dist_l + dist_r);
+    const float d_th = (dist_r - dist_l) / robot_.get_config().kinematics.wheel_base_m;
+
+    const float mid_th = state_.theta + 0.5f * d_th;
+    state_.x += ds_m * std::cos(mid_th) * 1000.0f;
+    state_.y += ds_m * std::sin(mid_th) * 1000.0f;
+    state_.theta += d_th;
+    state_.v = (dt > 1e-4f) ? (ds_m / dt) : 0.0f;
+    state_.w = (dt > 1e-4f) ? (d_th / dt) : 0.0f;
+    state_.lateral_accel_mps2 = state_.v * state_.w;
+    tel.current_velocity_mps = state_.v;
+
+    const float lookahead_mm = robot_.get_config().kinematics.sensor_lookahead_m * 1000.0f;
+    bar_center_x_ = state_.x + lookahead_mm * std::cos(state_.theta);
+    bar_center_y_ = state_.y + lookahead_mm * std::sin(state_.theta);
+
+    const float d_sq =
+      state_.trail.empty()
+        ? 100.0f
+        : (state_.trail.back().x - state_.x) * (state_.trail.back().x - state_.x) +
+            (state_.trail.back().y - state_.y) * (state_.trail.back().y - state_.y);
+    if (d_sq > 25.0f) {
+      state_.trail.push_back(Vector2{state_.x, state_.y});
+      if (state_.trail.size() > kMaxTrailPoints) {
+        state_.trail.pop_front();
+      }
+    }
+  }
+  state_.sim_time += dt;
+}
+
 SimRunReport SimEngine::run_lap(RobotMode mode, float max_sim_time_s) {
   SimRunReport report{};
   reset_pose(mode, false);
@@ -361,8 +478,8 @@ SimRunReport SimEngine::run_lap(RobotMode mode, float max_sim_time_s) {
     } else if (!state_.planned_trajectory.empty()) {
       std::vector<TrajectoryPoint> local_traj = state_.planned_trajectory;
       for (auto& pt : local_traj) {
-        pt.x_mm -= kStartPosX;
-        pt.y_mm -= kStartPosY;
+        pt.x_mm -= manifest_.start_x;
+        pt.y_mm -= manifest_.start_y;
       }
       robot_.set_racing_trajectory(local_traj);
     }
@@ -406,7 +523,7 @@ SimRunReport SimEngine::run_lap(RobotMode mode, float max_sim_time_s) {
   return report;
 }
 
-void SimEngine::dump_post_mortem(std::ostream& os, const SimRunReport& report) const {
+void SimEngine::dump_post_mortem(std::ostream& os, const SimRunReport& report) {
   os << "\n======================= [SIMULATION FAILURE POST-MORTEM] =======================\n";
   os << "Failure Reason    : " << report.failure_reason << "\n";
   os << "Official Status   : " << RaceArbiter::status_to_string(report.verdict.status) << "\n";
@@ -437,7 +554,7 @@ void SimEngine::dump_post_mortem(std::ostream& os, const SimRunReport& report) c
     os << "Step   | Time (s) | X (mm)   | Y (mm)   | Heading  | v (m/s) | Centroid | LineLost | "
           "ToF_F (m)\n";
     const size_t start_idx =
-      (report.pre_crash_tail.size() > 10) ? (report.pre_crash_tail.size() - 10) : 0;
+      (report.pre_crash_tail.size() > 120) ? (report.pre_crash_tail.size() - 120) : 0;
     for (size_t i = start_idx; i < report.pre_crash_tail.size(); ++i) {
       const auto& s = report.pre_crash_tail.at(i);
       os << std::setw(6) << i << " | " << std::fixed << std::setprecision(3) << std::setw(8)
@@ -452,7 +569,7 @@ void SimEngine::dump_post_mortem(std::ostream& os, const SimRunReport& report) c
   os << "================================================================================\n\n";
 }
 
-bool SimEngine::dump_crash_json(const char* filepath, const SimRunReport& report) const {
+bool SimEngine::dump_crash_json(const char* filepath, const SimRunReport& report) {
   std::ofstream fs(filepath);
   if (!fs.is_open()) {
     return false;
@@ -460,7 +577,7 @@ bool SimEngine::dump_crash_json(const char* filepath, const SimRunReport& report
 
   fs << "{\n";
   fs << "  \"success\": " << (report.success ? "true" : "false") << ",\n";
-  fs << "  \"failure_reason\": \"" << report.failure_reason << "\",\n";
+  fs << R"(  "failure_reason": ")" << report.failure_reason << R"(",)" << "\n";
   fs << "  \"lap_time_s\": " << report.lap_time_s << ",\n";
   fs << "  \"crash_record\": {\n";
   fs << "    \"time_s\": " << report.crash_record.timestamp_s << ",\n";

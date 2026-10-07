@@ -21,6 +21,8 @@ void TrajectoryFollower::reset() {
   evasion_origin_th_ = 0.0f;
   evasion_side_sign_ = 1.0f;
   evasion_cooldown_s_ = 0.0f;
+  current_bypass_length_m_ = obs_cfg_.bypass_length_m;
+  current_bypass_speed_mps_ = obs_cfg_.bypass_speed_mps;
   cross_track_error_m_ = 0.0f;
   heading_error_rad_ = 0.0f;
 }
@@ -90,7 +92,20 @@ void TrajectoryFollower::update(const Pose2D& pose, float current_v_mps, float /
     evasion_origin_y_ = pose.y_m;
     evasion_origin_th_ = pose.heading_rad;
     // Default to swerving left unless left space is constricted and right is clearer
-    evasion_side_sign_ = (in.tof_left_m < 0.20f && in.tof_right_m > in.tof_left_m) ? -1.0f : 1.0f;
+    evasion_side_sign_ =
+      (in.tof_left_m < obs_cfg_.danger_zone_dist_m && in.tof_right_m > in.tof_left_m) ? -1.0f
+                                                                                      : 1.0f;
+
+    // If detected dangerously close, dynamically compress chicane
+    const float d_detect = in.tof_front_m;
+    if (d_detect < obs_cfg_.danger_zone_dist_m) {
+      current_bypass_length_m_ =
+        std::clamp(2.5f * (d_detect + 0.05f), 0.45f, obs_cfg_.bypass_length_m);
+      current_bypass_speed_mps_ = obs_cfg_.recovery_speed_mps;
+    } else {
+      current_bypass_length_m_ = obs_cfg_.bypass_length_m;
+      current_bypass_speed_mps_ = obs_cfg_.bypass_speed_mps;
+    }
   }
 
   if (is_evading_) {
@@ -106,13 +121,13 @@ void TrajectoryFollower::update(const Pose2D& pose, float current_v_mps, float /
     const float d_left = dx * sin_th0 - dy * cos_th0;
     const float d_actual = d_left * evasion_side_sign_;
 
-    const float l_bypass = obs_cfg_.bypass_length_m;
+    const float l_bypass = current_bypass_length_m_;
     const float y_max = obs_cfg_.bypass_clearance_m;
 
     // Conclude evasion when continuous C2 chicane completes full trajectory
     if (s >= l_bypass) {
       is_evading_ = false;
-      evasion_cooldown_s_ = 0.25f;
+      evasion_cooldown_s_ = obs_cfg_.evasion_cooldown_duration_s;
     } else {
       // Continuous C2 Raised-Cosine target profile
       const float s_clamped = std::clamp(s, 0.0f, l_bypass);
@@ -126,7 +141,7 @@ void TrajectoryFollower::update(const Pose2D& pose, float current_v_mps, float /
 
       constexpr float kHeadingGain = 1.20f;
       constexpr float kCrossTrackGain = 1.80f;
-      const float v_target = obs_cfg_.bypass_speed_mps;
+      const float v_target = current_bypass_speed_mps_;
 
       const float steer = -(kHeadingGain * heading_err +
                             std::atan2(kCrossTrackGain * cross_track_err, v_target + 0.10f));
@@ -142,6 +157,17 @@ void TrajectoryFollower::update(const Pose2D& pose, float current_v_mps, float /
 
   // Safe optical line tracking
   if (!line_found) {
+    if (evasion_cooldown_s_ > 0.0f) {
+      // Actively steer back towards the line after obstacle bypass
+      const float v_target = obs_cfg_.recovery_speed_mps;
+      const float steer = evasion_side_sign_ * obs_cfg_.recovery_steer_rad;
+      apply_motor_drive(v_target, steer, out);
+      out_target_v = v_target;
+      out_target_steer = steer;
+      out_waypoint_idx = 0;
+      out_bypass_state = 0;
+      return;
+    }
     const float v_target = 0.0f;
     const float steer = 0.0f;
     apply_motor_drive(v_target, steer, out);
@@ -150,6 +176,9 @@ void TrajectoryFollower::update(const Pose2D& pose, float current_v_mps, float /
     out_waypoint_idx = 0;
     return;
   }
+
+  // Line re-acquired: clear evasion cooldown
+  evasion_cooldown_s_ = 0.0f;
 
   const float v_target = prof_cfg_.safe_map_speed_mps;
   const float steer = line_pid_.update(centroid_mm, dt);

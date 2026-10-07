@@ -33,6 +33,8 @@ void RobotCoordinator::reset_pose() {
   mode_ = RobotMode::kIdle;
   telemetry_ = {};
   finish_entry_dist_m_ = -1.0f;
+  tentative_entry_dist_m_ = -1.0f;
+  finish_dwell_time_s_ = 0.0f;
   last_record_dist_m_ = 0.0f;
 
   odometry_.reset();
@@ -44,6 +46,8 @@ void RobotCoordinator::set_mode(RobotMode mode) {
   mode_ = mode;
   follower_.reset();
   finish_entry_dist_m_ = -1.0f;
+  tentative_entry_dist_m_ = -1.0f;
+  finish_dwell_time_s_ = 0.0f;
   telemetry_.collision = false;
   telemetry_.obstacle.collision = false;
 
@@ -89,12 +93,28 @@ void RobotCoordinator::handle_idle_mode(MotorCmd& out) {
   out.active_brake = true;
 }
 
-bool RobotCoordinator::check_finish_condition(bool is_finish, float total_dist, MotorCmd& out) {
+bool RobotCoordinator::check_finish_condition(bool is_finish, float total_dist, float dt,
+                                              MotorCmd& out) {
   if (finish_entry_dist_m_ < 0.0f) {
-    if (!is_finish || total_dist <= config_.tracking.min_finish_arm_dist_m) {
+    if (total_dist <= config_.tracking.min_finish_arm_dist_m) {
+      finish_dwell_time_s_ = 0.0f;
+      tentative_entry_dist_m_ = -1.0f;
       return false;
     }
-    finish_entry_dist_m_ = total_dist;
+    if (is_finish) {
+      if (tentative_entry_dist_m_ < 0.0f) {
+        tentative_entry_dist_m_ = total_dist;
+      }
+      finish_dwell_time_s_ += dt;
+      if (finish_dwell_time_s_ < config_.tracking.finish_debounce_time_s) {
+        return false;
+      }
+      finish_entry_dist_m_ = tentative_entry_dist_m_;
+    } else {
+      finish_dwell_time_s_ = 0.0f;
+      tentative_entry_dist_m_ = -1.0f;
+      return false;
+    }
 
     if (mode_ == RobotMode::kRun1Map && recorded_trace_.size() > 10) {
       // Auto-generate global QP time-optimal racing line incorporating detected obstacles
@@ -105,7 +125,8 @@ bool RobotCoordinator::check_finish_condition(bool is_finish, float total_dist, 
 
   const float dist_in_finish = total_dist - finish_entry_dist_m_;
   if (dist_in_finish < config_.tracking.finish_zone_length_m) {
-    const float finish_speed = config_.profiler.safe_map_speed_mps * 0.5f;
+    const float finish_speed =
+      config_.profiler.safe_map_speed_mps * config_.tracking.finish_speed_factor;
     follower_.apply_motor_drive(finish_speed, 0.0f, out);
     return true;
   }
@@ -144,7 +165,7 @@ void RobotCoordinator::handle_run_1_map_mode(const SensorData& in, float centroi
                                              MotorCmd& out) {
   const float total_dist = odometry_.get_total_distance_m();
 
-  if (check_finish_condition(is_finish, total_dist, out)) {
+  if (check_finish_condition(is_finish, total_dist, dt, out)) {
     return;
   }
 
@@ -175,7 +196,7 @@ void RobotCoordinator::handle_run_1_map_mode(const SensorData& in, float centroi
     for (const auto& obs : detected_obstacles_) {
       const float dx = obs.x_mm - obs_x_mm;
       const float dy = obs.y_mm - obs_y_mm;
-      if (std::sqrt(dx * dx + dy * dy) < 250.0f) {
+      if (std::sqrt(dx * dx + dy * dy) < config_.environment.obstacle_merge_dist_mm) {
         exists = true;
         break;
       }
@@ -208,7 +229,7 @@ void RobotCoordinator::handle_run_2_sprint_mode(const SensorData& in, float cent
                                                 MotorCmd& out) {
   const float total_dist = odometry_.get_total_distance_m();
 
-  if (check_finish_condition(is_finish, total_dist, out)) {
+  if (check_finish_condition(is_finish, total_dist, dt, out)) {
     return;
   }
 
@@ -231,7 +252,9 @@ void RobotCoordinator::handle_run_2_sprint_mode(const SensorData& in, float cent
 void RobotCoordinator::update(const SensorData& in, MotorCmd& out) {
   float centroid_mm = telemetry_.centroid_pos_mm;
   const bool line_found = centroid_calc_.compute(in.ir_raw, centroid_mm);
-  const bool is_finish = centroid_calc_.is_finish_line(in.ir_raw);
+  const float total_dist_so_far = odometry_.get_total_distance_m();
+  const bool is_finish =
+    (total_dist_so_far > config_.tracking.min_finish_arm_dist_m) && (!line_found);
 
   if (line_found) {
     telemetry_.centroid_pos_mm = centroid_mm;

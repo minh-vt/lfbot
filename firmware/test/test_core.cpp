@@ -282,7 +282,8 @@ void test_profiler_live_reoptimization() {
   config.max_accel_mps2 = 5.0f;
   config.max_brake_mps2 = 5.0f;
   config.max_straight_speed_mps = 2.0f;
-  lf::TrajectoryPlanner const planner1(lf::EnvironmentConfig{}, config);
+  const lf::EnvironmentConfig env{};
+  lf::TrajectoryPlanner const planner1(env, config);
 
   std::vector<lf::TrajectoryPoint> raw_path;
   for (int x = 0; x <= 4000; x += 20) {
@@ -294,7 +295,7 @@ void test_profiler_live_reoptimization() {
 
   // Cập nhật tốc độ tối đa tăng lên 3.5 m/s
   config.max_straight_speed_mps = 3.5f;
-  lf::TrajectoryPlanner const planner2(lf::EnvironmentConfig{}, config);
+  lf::TrajectoryPlanner const planner2(env, config);
   auto traj2 = planner2.generate_racing_line(raw_path, {});
   const float v2 = traj2.at(100).target_speed_mps;
 
@@ -441,9 +442,7 @@ void simulate_run1_mapping_with_obstacle(lf::RobotCoordinator& robot, lf::Sensor
 
 void simulate_run1_finish_crossing(lf::RobotCoordinator& robot, lf::SensorData& in,
                                    lf::MotorCmd& out) {
-  for (size_t i = 0; i < lf::LineSensorConfig::kSensorCount; ++i) {
-    in.ir_raw.at(i) = 1.0f;
-  }
+  in.ir_raw.fill(0.0f);
   for (int step = 0; step < 50; ++step) {
     in.enc_left_ticks += 50;
     in.enc_right_ticks += 50;
@@ -523,11 +522,11 @@ void test_telemetry_packet_serialization_and_checksum() {
   // Tham nhieu thu mot byte bat ky -> Checksum phai phat hien va bao khong hop le
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
   auto* raw = reinterpret_cast<uint8_t*>(&pkt);
-  raw[10] ^= 0xFF;
+  raw[10] ^= 0xFFU;
   assert(!pkt.is_valid());
 
   // Khoi phuc byte -> Hop le tro lai
-  raw[10] ^= 0xFF;
+  raw[10] ^= 0xFFU;
   assert(pkt.is_valid());
   std::cout << "[TEST] Telemetry Packet -> 84 bytes packed, Checksum validated: 0x" << std::hex
             << pkt.checksum << std::dec << "\n";
@@ -575,11 +574,12 @@ void test_run1_corner_deceleration_and_line_loss_latch() {
 
 void simulate_run1_enter_finish_zone(lf::RobotCoordinator& robot, lf::SensorData& in,
                                      lf::MotorCmd& out) {
-  // 1. Mắt đọc thấy ô đen đích: robot tiếp tục chạy kéo thân xe vào trong ô và tối ưu racing line
-  for (size_t i = 0; i < 8; ++i) {
-    in.ir_raw.at(i) = 1.0f;
+  // 1. Mat doc thay het vach (toan trang): robot duy tri trong o dich >= 35ms de vuot qua bo loc
+  // debounce
+  in.ir_raw.fill(0.0f);
+  for (int i = 0; i < 2; ++i) {
+    robot.update(in, out);
   }
-  robot.update(in, out);
 
   assert(robot.get_mode() == lf::RobotMode::kRun1Map);
   assert(!out.active_brake);
@@ -758,7 +758,8 @@ void test_sprint_corridor_and_late_apex() {
   config.safe_map_speed_mps = 0.80f;
   config.max_straight_speed_mps = 2.00f;
 
-  lf::TrajectoryPlanner const planner(lf::EnvironmentConfig{}, config);
+  const lf::EnvironmentConfig env{};
+  lf::TrajectoryPlanner const planner(env, config);
 
   std::vector<lf::TrajectoryPoint> raw_path;
   for (int x = 0; x <= 2000; x += 10) {
@@ -788,7 +789,10 @@ void test_sprint_corridor_and_late_apex() {
 void test_sensor_area_integration_model() {
   // 3x3 Area integration modeling physical 5mm sensor aperture spot
   constexpr std::array<std::array<float, 3>, 3> kKernelWeights = {
-    {{0.06f, 0.14f, 0.06f}, {0.14f, 0.20f, 0.14f}, {0.06f, 0.14f, 0.06f}}};
+    std::array<float, 3>{0.06f, 0.14f, 0.06f},
+    std::array<float, 3>{0.14f, 0.20f, 0.14f},
+    std::array<float, 3>{0.06f, 0.14f, 0.06f},
+  };
 
   // 1. Verify kernel mathematical normalization: Sum of weights == 1.0f
   float sum_weights = 0.0f;
@@ -1384,6 +1388,7 @@ void test_sat_obb_collision_detection() {
     << "[TEST] SAT OBB 2D Collision Detection: All separation/intersection cases verified.\n";
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_robot_obstacle_collision_and_immediate_halt() {
   const lf::RobotConfig config{};
   lf::RobotCoordinator robot(config);
@@ -1433,6 +1438,110 @@ void test_robot_obstacle_collision_and_immediate_halt() {
   std::cout << "[TEST] Robot Obstacle Collision Detection & Immediate Halt: Verified.\n";
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_directional_branch_selection() {
+  const lf::LineSensorConfig cfg{};
+  const lf::CentroidCalculator calc(cfg);
+
+  // 1. Single continuous line: all priorities yield identical mathematical result
+  const std::array<float, 8> single_line = {0.0f, 0.0f, 0.8f, 1.0f, 0.1f, 0.0f, 0.0f, 0.0f};
+  float c_center = 0.0f;
+  float c_left = 0.0f;
+  float c_right = 0.0f;
+  assert(calc.compute(single_line, c_center, lf::BranchPriority::kCenter));
+  assert(calc.compute(single_line, c_left, lf::BranchPriority::kLeftFirst));
+  assert(calc.compute(single_line, c_right, lf::BranchPriority::kRightFirst));
+  assert(std::abs(c_center - c_left) < 1e-4f);
+  assert(std::abs(c_center - c_right) < 1e-4f);
+
+  // 2. Fork / Bifurcation (Honeycomb / Olympic rings): 2 distinct branches
+  // Left branch on sensors 0,1; Right branch on sensors 6,7; Gap on 2,3,4,5
+  const std::array<float, 8> fork_line = {1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
+  assert(calc.compute(fork_line, c_center, lf::BranchPriority::kCenter));
+  assert(calc.compute(fork_line, c_left, lf::BranchPriority::kLeftFirst));
+  assert(calc.compute(fork_line, c_right, lf::BranchPriority::kRightFirst));
+
+  // Center Priority cancels out to midpoint (0.0mm)
+  assert(std::abs(c_center) < 1e-4f);
+  // Left-first tracks leftmost cluster (sensors 0 and 1 -> weights -31.5 and -22.5 -> avg -27.0mm)
+  assert(c_left < -20.0f);
+  assert(std::abs(c_left - (-27.0f)) < 0.1f);
+  // Right-first tracks rightmost cluster (sensors 6 and 7 -> weights +22.5 and +31.5 -> avg
+  // +27.0mm)
+  assert(c_right > 20.0f);
+  assert(std::abs(c_right - 27.0f) < 0.1f);
+
+  std::cout << "[TEST] Directional Branch Selection -> Center: " << c_center
+            << " mm | Left-first: " << c_left << " mm | Right-first: " << c_right
+            << " mm: Verified\n";
+}
+
+void verify_debounce_rejection(lf::RobotCoordinator& robot, lf::SensorData& in, lf::MotorCmd& out) {
+  // Cross-line / checkpoint pulse: all-black MUST NOT trigger finish!
+  in.ir_raw.fill(1.0f);
+  robot.update(in, out);
+  robot.update(in, out);
+  assert(!robot.get_follower().has_trajectory());
+  assert(robot.get_mode() == lf::RobotMode::kRun1Map);
+
+  // Return to normal line
+  in.ir_raw.fill(0.0f);
+  in.ir_raw.at(3) = 1.0f;
+  in.ir_raw.at(4) = 1.0f;
+  robot.update(in, out);
+
+  // Transient line gap (all-white): 1 tick (20ms < 35ms threshold)
+  in.ir_raw.fill(0.0f);
+  robot.update(in, out);
+  // Debounce MUST suppress false finish latching!
+  assert(!robot.get_follower().has_trajectory());
+  assert(robot.get_mode() == lf::RobotMode::kRun1Map);
+}
+
+void test_finish_line_temporal_debounce() {
+  const lf::RobotConfig config{};
+  lf::RobotCoordinator robot(config);
+  robot.init();
+  robot.set_mode(lf::RobotMode::kRun1Map);
+
+  lf::SensorData in{};
+  in.dt = 0.02f;
+  in.tof_front_m = 1.0f;
+  in.ir_raw.at(3) = 1.0f;
+  in.ir_raw.at(4) = 1.0f;
+  lf::MotorCmd out{};
+
+  // Run past min_finish_arm_dist_m (1.0m) and log >10 trace points
+  for (int step = 1; step <= 25; ++step) {
+    in.enc_left_ticks = step * 250;
+    in.enc_right_ticks = step * 250;
+    robot.update(in, out);
+  }
+  assert(robot.get_recorded_trace().size() >= 10);
+  assert(!robot.get_follower().has_trajectory());
+
+  verify_debounce_rejection(robot, in, out);
+
+  // Return to normal line: transient gap cleared
+  in.ir_raw.at(3) = 1.0f;
+  in.ir_raw.at(4) = 1.0f;
+  robot.update(in, out);
+  assert(!robot.get_follower().has_trajectory());
+
+  // Sustained finish line entry (track line terminates): 2 ticks of all-white (40ms >= 35ms
+  // threshold)
+  in.ir_raw.fill(0.0f);
+  robot.update(in, out);
+  robot.update(in, out);
+  // Debounce confirmed: trajectory MUST be latched!
+  assert(robot.get_follower().has_trajectory());
+  assert(robot.get_mode() == lf::RobotMode::kRun1Map);
+  assert(!out.active_brake);
+
+  std::cout << "[TEST] Finish Line Temporal Debounce Filter -> Checkpoint ignored, 20ms white "
+               "rejected, 40ms white accepted: Verified\n";
+}
+
 }  // namespace
 
 int main() {
@@ -1443,6 +1552,7 @@ int main() {
   test_time_optimal_velocity_profiler();
   test_stanley_continuous_tracker();
   test_centroid_calculation();
+  test_directional_branch_selection();
   test_steering_direction();
   test_differential_kinematics();
   test_closed_loop_line_convergence();
@@ -1457,6 +1567,7 @@ int main() {
   test_telemetry_packet_serialization_and_checksum();
   test_run1_corner_deceleration_and_line_loss_latch();
   test_finish_zone_pull_in_and_sprint2_completion();
+  test_finish_line_temporal_debounce();
   test_speed_scaled_pid_attenuation();
   test_kinematic_curvature_mapping();
   test_reactive_sprint_braking_cap();

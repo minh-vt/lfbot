@@ -37,10 +37,10 @@ struct SectorGate {
 };
 
 struct FinishBoxGeometry {
-  float min_x_mm = 320.0f;
-  float max_x_mm = 480.0f;
-  float min_y_mm = 1220.0f;
-  float max_y_mm = 1380.0f;
+  float min_x_mm = 0.0f;
+  float max_x_mm = 0.0f;
+  float min_y_mm = 0.0f;
+  float max_y_mm = 0.0f;
 
   [[nodiscard]] bool contains(float x_mm, float y_mm) const {
     return x_mm >= min_x_mm && x_mm <= max_x_mm && y_mm >= min_y_mm && y_mm <= max_y_mm;
@@ -81,6 +81,12 @@ public:
   void generate_gates_from_centerline(const std::vector<TrajectoryPoint>& centerline,
                                       size_t num_gates = 3);
   void set_finish_box(const FinishBoxGeometry& box);
+  void set_arena_boundaries(float min_x, float max_x, float min_y, float max_y) {
+    arena_min_x_ = min_x;
+    arena_max_x_ = max_x;
+    arena_min_y_ = min_y;
+    arena_max_y_ = max_y;
+  }
   void set_max_lap_time(float max_time_s) { max_time_limit_s_ = max_time_s; }
 
   void step(const ArbiterGroundTruth& gt, float dt);
@@ -111,6 +117,10 @@ private:
   float current_sim_time_s_ = 0.0f;
   float continuous_line_lost_timer_s_ = 0.0f;
   float max_time_limit_s_ = 180.0f;  // Official Rule 5.2: 3 minutes max
+  float arena_min_x_ = -50.0f;
+  float arena_max_x_ = 2450.0f;
+  float arena_min_y_ = -50.0f;
+  float arena_max_y_ = 1650.0f;
   size_t next_gate_idx_ = 0;
   float prev_x_mm_ = 0.0f;
   float prev_y_mm_ = 0.0f;

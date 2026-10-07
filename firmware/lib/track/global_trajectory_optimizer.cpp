@@ -20,9 +20,10 @@ struct CenterlineGeometry {
 
 CenterlineGeometry compute_centerline_geometry(const std::vector<TrajectoryPoint>& centerline) {
   const size_t n = centerline.size();
-  CenterlineGeometry geom{std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f),
-                          std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f),
-                          std::vector<float>(n, 0.0f)};
+  CenterlineGeometry geom{
+    std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f),
+    std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f),
+  };
 
   for (size_t i = 1; i < n; ++i) {
     const float dist_mm = std::hypot(centerline.at(i).x_mm - centerline.at(i - 1).x_mm,
@@ -49,14 +50,12 @@ CenterlineGeometry compute_centerline_geometry(const std::vector<TrajectoryPoint
   return geom;
 }
 
-void apply_obstacle_corridor_constraints(const std::vector<TrajectoryPoint>& centerline,
-                                         const std::vector<ObstacleGeometry>& obstacles,
-                                         const EnvironmentConfig& env,
-                                         const CenterlineGeometry& geom, float obstacle_margin_mm,
-                                         std::vector<float>& alpha_min,
-                                         std::vector<float>& alpha_max) {
+void apply_obstacle_corridor_constraints(
+  const std::vector<TrajectoryPoint>& centerline, const std::vector<ObstacleGeometry>& obstacles,
+  const EnvironmentConfig& env, const CenterlineGeometry& geom, const OptimizationConfig& opt_cfg,
+  std::vector<float>& alpha_min, std::vector<float>& alpha_max) {
   const size_t n = centerline.size();
-  const float r_clearance_mm = env.clearance_radius_mm() + obstacle_margin_mm;
+  const float r_clearance_mm = env.clearance_radius_mm() + opt_cfg.obstacle_margin_mm;
 
   for (const auto& obs : obstacles) {
     size_t obs_idx = 0;
@@ -72,7 +71,7 @@ void apply_obstacle_corridor_constraints(const std::vector<TrajectoryPoint>& cen
     }
 
     const float min_dist = std::sqrt(min_dist_sq);
-    if (min_dist > r_clearance_mm + 150.0f) {
+    if (min_dist > r_clearance_mm + opt_cfg.relevance_margin_mm) {
       continue;
     }
 
@@ -81,7 +80,8 @@ void apply_obstacle_corridor_constraints(const std::vector<TrajectoryPoint>& cen
     const float vy = obs.y_mm - centerline.at(obs_idx).y_mm;
     const float d_obs = vx * geom.nx.at(obs_idx) + vy * geom.ny.at(obs_idx);
 
-    const float l_trans_mm = std::max(400.0f, 2.5f * r_clearance_mm);
+    const float l_trans_mm =
+      std::max(opt_cfg.min_transition_length_mm, opt_cfg.transition_factor * r_clearance_mm);
 
     for (size_t i = 0; i < n; ++i) {
       const float ds_obs_mm = std::abs(geom.s_m.at(i) - s_obs) * 1000.0f;
@@ -96,12 +96,12 @@ void apply_obstacle_corridor_constraints(const std::vector<TrajectoryPoint>& cen
         // bound).
         const float bound = (d_obs + r_clearance_mm) * envelope;
         alpha_min.at(i) = std::max(alpha_min.at(i), bound);
-        alpha_max.at(i) = std::max(alpha_max.at(i), bound + obstacle_margin_mm);
+        alpha_max.at(i) = std::max(alpha_max.at(i), bound + opt_cfg.obstacle_margin_mm);
       } else {
         // Obstacle is on positive normal side. Pass on negative side (alpha <= bound).
         const float bound = (d_obs - r_clearance_mm) * envelope;
         alpha_max.at(i) = std::min(alpha_max.at(i), bound);
-        alpha_min.at(i) = std::min(alpha_min.at(i), bound - obstacle_margin_mm);
+        alpha_min.at(i) = std::min(alpha_min.at(i), bound - opt_cfg.obstacle_margin_mm);
       }
     }
   }
@@ -134,9 +134,10 @@ QPMatrix assemble_qp_system(size_t n, const CenterlineGeometry& geom, float curv
     b_k.at(k) = curvature_weight * ds * c_k * geom.kappa_cl.at(k);
   }
 
-  QPMatrix qp{std::vector<float>(n, reg_weight), std::vector<float>(n, 0.0f),
-              std::vector<float>(n, 0.0f),       std::vector<float>(n, 0.0f),
-              std::vector<float>(n, 0.0f),       std::vector<float>(n, 0.0f)};
+  QPMatrix qp{
+    std::vector<float>(n, reg_weight), std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f),
+    std::vector<float>(n, 0.0f),       std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f),
+  };
 
   for (size_t i = 0; i < n; ++i) {
     if (i >= 2 && i - 1 < n - 1) {
@@ -262,8 +263,8 @@ std::vector<TrajectoryPoint> GlobalTrajectoryOptimizer::optimize(
 
   std::vector<float> alpha_min(n, -config_.max_lateral_deviation_mm);
   std::vector<float> alpha_max(n, config_.max_lateral_deviation_mm);
-  apply_obstacle_corridor_constraints(centerline, obstacles, env, geom, config_.obstacle_margin_mm,
-                                      alpha_min, alpha_max);
+  apply_obstacle_corridor_constraints(centerline, obstacles, env, geom, config_, alpha_min,
+                                      alpha_max);
 
   const QPMatrix qp = assemble_qp_system(n, geom, config_.curvature_weight, config_.reg_weight);
 

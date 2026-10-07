@@ -33,9 +33,13 @@ struct OptimizationConfig {
   float max_lateral_deviation_mm = 15.0f;
   float curvature_weight = 1.0f;
   float reg_weight = 1e-4f;
+  float jerk_damping_weight = 0.05f;
   int max_iterations = 250;
   float tolerance_mm = 0.01f;
   float obstacle_margin_mm = 15.0f;
+  float relevance_margin_mm = 150.0f;
+  float min_transition_length_mm = 400.0f;
+  float transition_factor = 2.5f;
 };
 
 class GlobalTrajectoryOptimizer {

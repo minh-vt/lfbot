@@ -7,24 +7,20 @@
 
 namespace {
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_sim_run1_map_learning(lf::sim::SimEngine& engine, float& out_run1_time_s) {
   std::cout << "[SIM TEST] Running Run 1: Map Scanning & C2 Trajectory Generation...\n";
 
-  const std::vector<lf::sim::Obstacle> obstacles = {
-    {{1100.0f, 300.0f}, 105.0f, 60.0f, 0.0f},
-  };
-  engine.set_obstacles(obstacles);
-
-  const auto report = engine.run_lap(lf::RobotMode::kRun1Map, 25.0f);
+  const auto report = engine.run_lap(lf::RobotMode::kRun1Map, 60.0f);
   if (!report.success) {
-    engine.dump_post_mortem(std::cerr, report);
+    lf::sim::SimEngine::dump_post_mortem(std::cerr, report);
   }
   assert(report.success);
   assert(report.verdict.status == lf::sim::RaceStatus::kCompleted);
   assert(report.verdict.sectors_cleared == report.verdict.total_sectors);
   assert(report.verdict.stopped_in_finish_box);
   assert(report.verdict.continuous_off_line_s < 5.0f);
-  assert(report.lap_time_s >= 8.0f && report.lap_time_s <= 22.0f);
+  assert(report.lap_time_s >= 7.5f && report.lap_time_s <= 22.0f);
   assert(report.waypoints_count >= 100);
   assert(engine.get_state().has_run1_data);
   assert(!engine.get_state().planned_trajectory.empty());
@@ -39,12 +35,13 @@ void test_sim_run1_map_learning(lf::sim::SimEngine& engine, float& out_run1_time
             << " m/s, Min Obs Dist = " << report.min_obstacle_clearance_mm << " mm\n";
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_sim_run2_c2_sprint_evasion(lf::sim::SimEngine& engine, float run1_time_s) {
   std::cout << "[SIM TEST] Running Run 2: C2 Racing Line Sprint with Obstacle Avoidance...\n";
 
   const auto report = engine.run_lap(lf::RobotMode::kRun2Sprint, 22.0f);
   if (!report.success) {
-    engine.dump_post_mortem(std::cerr, report);
+    lf::sim::SimEngine::dump_post_mortem(std::cerr, report);
   }
   assert(report.success);
   assert(report.verdict.status == lf::sim::RaceStatus::kCompleted);
@@ -75,9 +72,9 @@ void test_sim_run2_c2_sprint_evasion(lf::sim::SimEngine& engine, float run1_time
 void test_sim_failure_post_mortem_diagnostics(lf::sim::SimEngine& engine) {
   std::cout << "[SIM TEST] Verifying Crash Post-Mortem Diagnostics Harness...\n";
 
-  // Intentionally place an obstacle directly in front of start pose at (580, 1300)
+  // Intentionally place an obstacle directly in front of start pose at (360, 220)
   const std::vector<lf::sim::Obstacle> impassable_obs = {
-    {{580.0f, 1300.0f}, 150.0f, 150.0f, 0.0f},
+    {{360.0f, 219.5f}, 150.0f, 150.0f, 0.0f},
   };
   engine.set_obstacles(impassable_obs);
 
@@ -87,11 +84,11 @@ void test_sim_failure_post_mortem_diagnostics(lf::sim::SimEngine& engine) {
   assert(report.verdict.status == lf::sim::RaceStatus::kDisqualified);
   assert(report.verdict.infraction == lf::sim::InfractionCode::kObstacleCollision);
   assert(report.crash_record.timestamp_s > 0.0f);
-  assert(report.crash_record.x_mm > 500.0f && report.crash_record.x_mm <= 650.0f);
+  assert(report.crash_record.x_mm > 280.0f && report.crash_record.x_mm <= 420.0f);
   assert(report.min_obstacle_clearance_mm < 130.0f);
 
   // Dump JSON crash log to verify serializer
-  const bool json_ok = engine.dump_crash_json(".sim_crash_test.json", report);
+  const bool json_ok = lf::sim::SimEngine::dump_crash_json(".sim_crash_test.json", report);
   assert(json_ok);
 
   std::cout << "  -> Crash Post-Mortem Reporter PASSED: Correctly caught collision at t="
@@ -284,11 +281,16 @@ int main() {
   std::cout << "================================================================================\n";
 
   lf::sim::SimEngine engine;
-  const bool loaded = engine.load_track("assets/track.png");
+  lf::sim::TrackManifest manifest{};
+  bool loaded = lf::sim::load_track_manifest("assets/track_vongloai.json", manifest);
   if (!loaded) {
-    std::cerr << "[ERROR] Could not load assets/track.png! Run from firmware directory.\n";
+    loaded = lf::sim::load_track_manifest("firmware/assets/track_vongloai.json", manifest);
+  }
+  if (!loaded) {
+    std::cerr << "[ERROR] Could not load assets/track_vongloai.json!\n";
     return 1;
   }
+  engine.load_manifest(manifest);
 
   // 1. End-to-end full race simulations
   float run1_time_s = 0.0f;

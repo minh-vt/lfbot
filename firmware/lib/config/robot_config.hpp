@@ -12,6 +12,7 @@ struct EnvironmentConfig {
   float obstacle_width_mm = 60.0f;
   float safety_margin_mm = 25.0f;
   float robot_width_mm = 138.0f;
+  float obstacle_merge_dist_mm = 250.0f;
 
   // Bán kính bao ngoại tiếp vật cản: R_obs = 0.5 * sqrt(105^2 + 60^2) = 60.5 mm
   [[nodiscard]] float obstacle_radius_mm() const {
@@ -42,6 +43,10 @@ struct LineSensorConfig {
   float line_presence_threshold = 0.15f;
   float finish_line_threshold = 0.75f;
   int min_finish_eyes = 7;
+  float cross_marker_threshold = 0.45f;
+  int cross_marker_min_eyes = 6;
+  float branch_cluster_threshold = 0.35f;
+  float optical_confidence_k = 10.0f;
 
   // Trọng số vị trí hình học của 8 cảm biến:
   // Với 8 mắt đối xứng qua tâm x = 0 và bước mắt d = 9.0 mm:
@@ -67,10 +72,16 @@ struct PIDConfig {
 struct ObstacleConfig {
   float front_detect_dist_m = 0.35f;
   float approach_stop_dist_m = 0.07f;
-  float bypass_clearance_m = 0.18f;
-  float bypass_length_m = 0.70f;
+  float bypass_clearance_m = 0.22f;
+  float bypass_length_m = 0.82f;
   float bypass_speed_mps = 0.45f;
   float min_valid_tof_m = 0.01f;
+  float danger_zone_dist_m = 0.20f;
+  float evasion_cooldown_duration_s = 1.0f;
+  float recovery_speed_mps = 0.35f;
+  float recovery_steer_rad = 0.12f;
+  float repulsion_gain = 0.10f;
+  float side_tof_repulsion_gain = 0.05f;
 };
 
 struct ProfilerConfig {
@@ -85,7 +96,11 @@ struct ProfilerConfig {
 
 struct TrackingConfig {
   float min_finish_arm_dist_m = 1.0f;
-  float finish_zone_length_m = 0.155f;
+  float finish_zone_length_m = 0.125f;
+  float finish_debounce_time_s = 0.035f;
+  float finish_speed_factor = 0.5f;
+  float line_loss_timeout_s = 0.50f;
+  float inertial_decay_lambda = 2.0f;
 };
 
 struct RobotConfig {

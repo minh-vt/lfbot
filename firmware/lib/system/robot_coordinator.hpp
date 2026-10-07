@@ -57,6 +57,7 @@ public:
   void set_obstacle_parameters(float front_detect_dist_m, float clearance_m, float length_m);
   void get_obstacle_parameters(float& front_detect_dist_m, float& clearance_m,
                                float& length_m) const;
+  void set_min_finish_arm_dist(float dist_m) { config_.tracking.min_finish_arm_dist_m = dist_m; }
 
 private:
   static void handle_idle_mode(MotorCmd& out);
@@ -65,7 +66,7 @@ private:
                              bool is_finish, float dt, MotorCmd& out);
   void handle_run_2_sprint_mode(const SensorData& in, float centroid_mm, bool line_found,
                                 bool is_finish, float dt, MotorCmd& out);
-  bool check_finish_condition(bool is_finish, float total_dist, MotorCmd& out);
+  bool check_finish_condition(bool is_finish, float total_dist, float dt, MotorCmd& out);
 
   RobotConfig config_;
   RobotMode mode_ = RobotMode::kIdle;
@@ -81,6 +82,8 @@ private:
   std::vector<TrajectoryPoint> racing_trajectory_;
   std::vector<ObstacleGeometry> detected_obstacles_;
   float finish_entry_dist_m_ = -1.0f;
+  float tentative_entry_dist_m_ = -1.0f;
+  float finish_dwell_time_s_ = 0.0f;
   float last_record_dist_m_ = 0.0f;
 };
 

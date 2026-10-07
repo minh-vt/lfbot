@@ -13,6 +13,8 @@
 #include "raycast.hpp"
 #include "raylib.h"
 #include "system/robot_coordinator.hpp"
+#include "system/telemetry_packet.hpp"
+#include "track_manifest.hpp"
 #include "types.hpp"
 
 namespace lf::sim {
@@ -78,15 +80,22 @@ public:
   SimEngine& operator=(SimEngine&&) noexcept = default;
 
   bool load_track(const char* image_path);
+  bool load_manifest(const TrackManifest& manifest);
   void set_obstacles(const std::vector<Obstacle>& obstacles);
   [[nodiscard]] const std::vector<Obstacle>& get_obstacles() const { return obstacles_; }
   std::vector<Obstacle>& get_obstacles_mut() { return obstacles_; }
+  [[nodiscard]] const TrackManifest& get_manifest() const { return manifest_; }
+  TrackManifest& get_manifest_mut() { return manifest_; }
 
   void reset_pose(RobotMode mode, bool clear_map = false);
+  void reset_pose(RobotMode mode, bool clear_map, float start_x, float start_y, float start_theta);
   SimStepResult step(float dt = 0.002f);
-  SimRunReport run_lap(RobotMode mode, float max_sim_time_s = 25.0f);
+  void update_from_telemetry(const TelemetryPacket& pkt, float dt, int32_t& prev_enc_l,
+                             int32_t& prev_enc_r, bool& is_first_pkt);
+  SimRunReport run_lap(RobotMode mode, float max_sim_time_s = 60.0f);
 
   void recompute_racing_trajectory();
+  void recompute_racing_trajectory(float start_x, float start_y);
 
   [[nodiscard]] const SimRobotState& get_state() const { return state_; }
   [[nodiscard]] SimRobotState& get_state_mut() { return state_; }
@@ -102,9 +111,11 @@ public:
   [[nodiscard]] float get_bar_center_x() const { return bar_center_x_; }
   [[nodiscard]] float get_bar_center_y() const { return bar_center_y_; }
   [[nodiscard]] const SensorData& get_sensor_input() const { return in_; }
+  [[nodiscard]] float get_track_width_mm() const { return track_width_mm_; }
+  [[nodiscard]] float get_track_height_mm() const { return track_height_mm_; }
 
-  void dump_post_mortem(std::ostream& os, const SimRunReport& report) const;
-  bool dump_crash_json(const char* filepath, const SimRunReport& report) const;
+  static void dump_post_mortem(std::ostream& os, const SimRunReport& report);
+  static bool dump_crash_json(const char* filepath, const SimRunReport& report);
 
 private:
   void sample_ir_sensors(float bar_center_x, float bar_center_y, float cos_th, float sin_th);
@@ -118,6 +129,9 @@ private:
   std::vector<Obstacle> obstacles_;
   Image blurred_track_{};
   bool track_loaded_ = false;
+  TrackManifest manifest_{};
+  float track_width_mm_ = 0.0f;
+  float track_height_mm_ = 0.0f;
 
   SensorData in_{};
   TofHitPoints hits_{};

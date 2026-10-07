@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "config/robot_config.hpp"
+#include "theme.hpp"
 
 namespace lf::sim {
 
@@ -66,18 +67,18 @@ void draw_hazard_obstacle(const Obstacle& obs, bool is_hovered, float clearance_
 }
 
 void draw_arena_background(Texture2D track_texture) {
-  DrawRectangle(0, 0, static_cast<int>(kTrackWidthMm), static_cast<int>(kTrackHeightMm),
-                Color{248, 249, 250, 255});
-  for (int gx = 0; gx <= static_cast<int>(kTrackWidthMm); gx += 200) {
-    DrawLine(gx, 0, gx, static_cast<int>(kTrackHeightMm), Color{225, 230, 238, 255});
+  const auto track_w = static_cast<float>(track_texture.width);
+  const auto track_h = static_cast<float>(track_texture.height);
+  DrawRectangle(0, 0, static_cast<int>(track_w), static_cast<int>(track_h), Theme::kArenaBg);
+  for (int gx = 0; gx <= static_cast<int>(track_w); gx += 200) {
+    DrawLine(gx, 0, gx, static_cast<int>(track_h), Theme::kArenaGrid);
   }
-  for (int gy = 0; gy <= static_cast<int>(kTrackHeightMm); gy += 200) {
-    DrawLine(0, gy, static_cast<int>(kTrackWidthMm), gy, Color{225, 230, 238, 255});
+  for (int gy = 0; gy <= static_cast<int>(track_h); gy += 200) {
+    DrawLine(0, gy, static_cast<int>(track_w), gy, Theme::kArenaGrid);
   }
 
   DrawTexture(track_texture, 0, 0, WHITE);
-  DrawRectangleLinesEx(Rectangle{0, 0, kTrackWidthMm, kTrackHeightMm}, 4.0f,
-                       Color{71, 85, 105, 255});
+  DrawRectangleLinesEx(Rectangle{0, 0, track_w, track_h}, 4.0f, Theme::kArenaBorder);
 }
 
 void draw_robot_trail(const std::deque<Vector2>& trail, lf::RobotMode mode) {
@@ -293,6 +294,31 @@ void draw_tof_beams(float bar_center_x, float bar_center_y, Vector2 l_origin, Ve
     DrawCircleSectorLines(r_origin, kSideRangeMm, right_deg - kHalfFovDeg, right_deg + kHalfFovDeg,
                           20, ColorAlpha(r_col, 0.35f));
   }
+}
+
+void draw_start_and_finish_zones(float start_x, float start_y, float start_theta_deg,
+                                 float fin_min_x, float fin_max_x, float fin_min_y,
+                                 float fin_max_y) {
+  // 1. Finish Box
+  const float fb_w = fin_max_x - fin_min_x;
+  const float fb_h = fin_max_y - fin_min_y;
+  DrawRectangleRounded(Rectangle{fin_min_x, fin_min_y, fb_w, fb_h}, 0.15f, 4,
+                       ColorAlpha(Color{16, 185, 129, 255}, 0.18f));
+  DrawRectangleRoundedLines(Rectangle{fin_min_x, fin_min_y, fb_w, fb_h}, 0.15f, 4,
+                            Color{16, 185, 129, 240});
+  DrawText("FINISH BOX", static_cast<int>(fin_min_x + 8.0f), static_cast<int>(fin_min_y + 8.0f), 16,
+           Color{16, 185, 129, 255});
+
+  // 2. Start Pose Marker
+  const float th_rad = start_theta_deg * DEG2RAD;
+  DrawCircleLines(static_cast<int>(start_x), static_cast<int>(start_y), 24.0f,
+                  Color{56, 189, 248, 200});
+  DrawCircle(static_cast<int>(start_x), static_cast<int>(start_y), 5.0f, Color{56, 189, 248, 255});
+  DrawLineEx(Vector2{start_x, start_y},
+             Vector2{start_x + 35.0f * std::cos(th_rad), start_y + 35.0f * std::sin(th_rad)}, 3.0f,
+             Color{56, 189, 248, 255});
+  DrawText("START", static_cast<int>(start_x - 20.0f), static_cast<int>(start_y - 42.0f), 14,
+           Color{56, 189, 248, 255});
 }
 
 }  // namespace lf::sim

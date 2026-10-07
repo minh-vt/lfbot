@@ -13,16 +13,10 @@ constexpr int kBaseWindowWidth = 1920;
 constexpr int kBaseWindowHeight = 1080;
 constexpr float kBaseSidebarWidth = 490.0f;
 
-constexpr float kTrackWidthMm = 2400.0f;
-constexpr float kTrackHeightMm = 1600.0f;
-
 constexpr float kRobotLengthMm = 145.0f;
 constexpr float kRobotWidthMm = 138.0f;
 constexpr float kWheelLengthMm = 44.0f;
 constexpr float kWheelWidthMm = 14.0f;
-
-constexpr float kStartPosX = 500.0f;
-constexpr float kStartPosY = 1300.0f;
 
 constexpr size_t kMaxTrailPoints = 4000;
 
@@ -48,9 +42,16 @@ struct TofHitPoints {
   TofHitPoint right{};
 };
 
+enum class SetupTool : uint8_t {
+  kSelect = 0,
+  kSetStart,
+  kSetFinish,
+  kAddObstacle,
+};
+
 struct SimRobotState {
-  float x = kStartPosX;
-  float y = kStartPosY;
+  float x = 0.0f;
+  float y = 0.0f;
   float theta = 0.0f;
   float v = 0.0f;
   float w = 0.0f;
@@ -84,6 +85,8 @@ struct SimRobotState {
   int hovered_trajectory_idx = -1;
   bool is_crashed = false;
   int crashed_obstacle_idx = -1;
+  bool is_setup_mode = false;
+  SetupTool setup_tool = SetupTool::kSelect;
 };
 
 }  // namespace lf::sim

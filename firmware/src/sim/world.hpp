@@ -38,4 +38,8 @@ void draw_tof_beams(float bar_center_x, float bar_center_y, Vector2 l_origin, Ve
                     float robot_theta, const TofHitPoints& hits, const lf::SensorData& in,
                     float d_obs_m = 0.35f);
 
+void draw_start_and_finish_zones(float start_x, float start_y, float start_theta_deg,
+                                 float fin_min_x, float fin_max_x, float fin_min_y,
+                                 float fin_max_y);
+
 }  // namespace lf::sim

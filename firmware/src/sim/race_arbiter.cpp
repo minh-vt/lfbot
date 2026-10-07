@@ -101,16 +101,11 @@ void RaceArbiter::set_finish_box(const FinishBoxGeometry& box) {
 }
 
 void RaceArbiter::check_arena_boundaries(const ArbiterGroundTruth& gt) {
-  constexpr float kArenaMinX = -50.0f;
-  constexpr float kArenaMaxX = 2450.0f;
-  constexpr float kArenaMinY = -50.0f;
-  constexpr float kArenaMaxY = 1650.0f;
-
-  if (gt.x_mm < kArenaMinX || gt.x_mm > kArenaMaxX || gt.y_mm < kArenaMinY ||
-      gt.y_mm > kArenaMaxY) {
+  if (gt.x_mm < arena_min_x_ || gt.x_mm > arena_max_x_ || gt.y_mm < arena_min_y_ ||
+      gt.y_mm > arena_max_y_) {
     verdict_.status = RaceStatus::kDisqualified;
     verdict_.infraction = InfractionCode::kOutOfBounds;
-    verdict_.infraction_detail = "Vehicle breached arena boundary limits (2400x1600mm)";
+    verdict_.infraction_detail = "Vehicle breached arena boundary limits";
   }
 }
 
