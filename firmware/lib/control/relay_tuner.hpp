@@ -17,7 +17,7 @@ struct TunerResult {
 
 class RelayTuner {
 public:
-  explicit RelayTuner(float relay_amplitude = 0.12f, float hysteresis_mm = 1.0f);
+  explicit RelayTuner(float relay_amplitude = 0.35f, float hysteresis_mm = 3.5f);
 
   void reset();
 
@@ -34,8 +34,8 @@ public:
 private:
   void record_cycle(float period_s, float amplitude_mm);
 
-  float relay_amp_ = 0.12f;
-  float hysteresis_mm_ = 1.0f;
+  float relay_amp_ = 0.35f;
+  float hysteresis_mm_ = 3.5f;
   float current_steer_ = 0.0f;
 
   float peak_pos_mm_ = 0.0f;

@@ -12,7 +12,7 @@ struct StanleyConfig {
   float k_soft = 0.25f;
   float k_heading = 1.3f;
   float wheel_base_m = 0.115f;
-  float max_steer_rad = 1.00f;
+  float max_steer_rad = 1.50f;
   float lookahead_dist_m = 0.055f;
 };
 

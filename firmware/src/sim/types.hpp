@@ -87,6 +87,7 @@ struct SimRobotState {
   int crashed_obstacle_idx = -1;
   bool is_setup_mode = false;
   SetupTool setup_tool = SetupTool::kSelect;
+  bool is_tuning_drawer_open = false;
 };
 
 }  // namespace lf::sim

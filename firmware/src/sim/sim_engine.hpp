@@ -96,6 +96,7 @@ public:
 
   void recompute_racing_trajectory();
   void recompute_racing_trajectory(float start_x, float start_y);
+  [[nodiscard]] bool has_trajectory_data() const;
 
   [[nodiscard]] const SimRobotState& get_state() const { return state_; }
   [[nodiscard]] SimRobotState& get_state_mut() { return state_; }

@@ -131,6 +131,20 @@ void SimEngine::reset_pose(RobotMode mode, bool clear_map, float start_x, float 
   }
 
   robot_.set_mode(mode);
+
+  if (mode == RobotMode::kRun2Sprint && !state_.planned_trajectory.empty()) {
+    std::vector<TrajectoryPoint> local_traj = state_.planned_trajectory;
+    for (auto& pt : local_traj) {
+      pt.x_mm -= start_x;
+      pt.y_mm -= start_y;
+    }
+    robot_.set_racing_trajectory(local_traj);
+  }
+}
+
+bool SimEngine::has_trajectory_data() const {
+  return (state_.unoptimized_trail.size() >= 10 || !state_.planned_trajectory.empty() ||
+          robot_.get_recorded_trace().size() >= 10 || state_.trail.size() >= 10);
 }
 
 void SimEngine::recompute_racing_trajectory() {
@@ -138,14 +152,33 @@ void SimEngine::recompute_racing_trajectory() {
 }
 
 void SimEngine::recompute_racing_trajectory(float start_x, float start_y) {
-  if (state_.unoptimized_trail.size() < 10) {
-    return;
+  if (state_.unoptimized_trail.size() < 10 && state_.trail.size() >= 10) {
+    state_.unoptimized_trail.assign(state_.trail.begin(), state_.trail.end());
   }
 
   std::vector<TrajectoryPoint> raw_path;
-  raw_path.reserve(state_.unoptimized_trail.size());
-  for (const auto& pt : state_.unoptimized_trail) {
-    raw_path.push_back({pt.x, pt.y, robot_.get_config().profiler.safe_map_speed_mps, 0.0f});
+  if (state_.unoptimized_trail.size() >= 10) {
+    raw_path.reserve(state_.unoptimized_trail.size());
+    for (const auto& pt : state_.unoptimized_trail) {
+      raw_path.push_back({pt.x, pt.y, robot_.get_config().profiler.safe_map_speed_mps, 0.0f});
+    }
+  } else if (!state_.planned_trajectory.empty()) {
+    raw_path.reserve(state_.planned_trajectory.size());
+    for (const auto& pt : state_.planned_trajectory) {
+      raw_path.push_back({pt.x_mm, pt.y_mm, robot_.get_config().profiler.safe_map_speed_mps, 0.0f});
+    }
+  } else if (robot_.get_recorded_trace().size() >= 10) {
+    raw_path.reserve(robot_.get_recorded_trace().size());
+    for (const auto& pt : robot_.get_recorded_trace()) {
+      raw_path.push_back({
+        pt.x_mm + start_x,
+        pt.y_mm + start_y,
+        robot_.get_config().profiler.safe_map_speed_mps,
+        0.0f,
+      });
+    }
+  } else {
+    return;
   }
 
   std::vector<ObstacleGeometry> obs_geom;
@@ -154,7 +187,8 @@ void SimEngine::recompute_racing_trajectory(float start_x, float start_y) {
     obs_geom.push_back({obs.pos.x, obs.pos.y, obs.width_mm, obs.height_mm, obs.angle_deg});
   }
 
-  const TrajectoryPlanner planner(robot_.get_config().environment, robot_.get_config().profiler);
+  const TrajectoryPlanner planner(robot_.get_config().environment, robot_.get_config().profiler,
+                                  robot_.get_planner().get_optimizer_config());
   state_.planned_trajectory = planner.generate_racing_line(raw_path, obs_geom);
 
   // Chuyen toa do arena frame sang robot local odometry frame

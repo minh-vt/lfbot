@@ -45,6 +45,12 @@ lf::sim::GuiAction poll_mode_hotkeys(lf::sim::SimRobotState& state, char* toast_
   if (IsKeyPressed(KEY_T)) {
     return lf::sim::GuiAction::kAutoTune;
   }
+  if (IsKeyPressed(KEY_P)) {
+    return lf::sim::GuiAction::kToggleTuningDrawer;
+  }
+  if (IsKeyPressed(KEY_O)) {
+    return lf::sim::GuiAction::kTriggerLiveReopt;
+  }
 
   if (IsKeyPressed(KEY_F4)) {
     state.is_telemetry_mode = !state.is_telemetry_mode;
@@ -62,87 +68,6 @@ lf::sim::GuiAction poll_mode_hotkeys(lf::sim::SimRobotState& state, char* toast_
   }
 
   return lf::sim::GuiAction::kNone;
-}
-
-void handle_parameter_tuning_hotkeys(lf::RobotCoordinator& robot, char* toast_msg,
-                                     size_t toast_size, float& toast_timer) {
-  float cur_kp = 0.0f;
-  float cur_ki = 0.0f;
-  float cur_kd = 0.0f;
-  robot.get_line_pid_gains(cur_kp, cur_ki, cur_kd);
-
-  const float cur_v_map = robot.get_config().profiler.safe_map_speed_mps;
-  const float cur_v_sprint = robot.get_config().profiler.max_straight_speed_mps;
-  float cur_obs_front = 0.0f;
-  float cur_obs_clear = 0.0f;
-  float cur_obs_len = 0.0f;
-  robot.get_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len);
-
-  const float cur_accel = robot.get_config().profiler.max_accel_mps2;
-
-  constexpr float kStepKp = 0.005f;
-  constexpr float kStepKd = 0.001f;
-  constexpr float kStepObsDist = 0.02f;
-  constexpr float kStepObsClear = 0.01f;
-  constexpr float kStepObsLen = 0.05f;
-  constexpr float kStepSpeed = 0.20f;
-  constexpr float kStepAccel = 0.50f;
-
-  if (IsKeyPressed(KEY_U)) {
-    robot.set_line_pid_gains(cur_kp + kStepKp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Kp = %.4f", cur_kp + kStepKp);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_J)) {
-    robot.set_line_pid_gains(cur_kp - kStepKp, cur_ki, cur_kd);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Kp = %.4f", cur_kp - kStepKp);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_I)) {
-    robot.set_line_pid_gains(cur_kp, cur_ki, cur_kd + kStepKd);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Kd = %.4f", cur_kd + kStepKd);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_K)) {
-    robot.set_line_pid_gains(cur_kp, cur_ki, cur_kd - kStepKd);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Kd = %.4f", cur_kd - kStepKd);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_Y)) {
-    robot.set_obstacle_parameters(cur_obs_front + kStepObsDist, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "TUNING: D_obs = %.2f m", cur_obs_front + kStepObsDist);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_H)) {
-    robot.set_obstacle_parameters(cur_obs_front - kStepObsDist, cur_obs_clear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "TUNING: D_obs = %.2f m", cur_obs_front - kStepObsDist);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_B)) {
-    robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear + kStepObsClear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Y_clear = %.2f m",
-                   cur_obs_clear + kStepObsClear);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_G)) {
-    robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear - kStepObsClear, cur_obs_len);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Y_clear = %.2f m",
-                   cur_obs_clear - kStepObsClear);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_N)) {
-    robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len + kStepObsLen);
-    (void)snprintf(toast_msg, toast_size, "TUNING: L_chicane = %.2f m", cur_obs_len + kStepObsLen);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_V)) {
-    robot.set_obstacle_parameters(cur_obs_front, cur_obs_clear, cur_obs_len - kStepObsLen);
-    (void)snprintf(toast_msg, toast_size, "TUNING: L_chicane = %.2f m", cur_obs_len - kStepObsLen);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_W)) {
-    robot.set_tactical_speeds(cur_v_map, cur_v_sprint + kStepSpeed);
-    (void)snprintf(toast_msg, toast_size, "TUNING: V_sprint = %.2f m/s", cur_v_sprint + kStepSpeed);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_A)) {
-    robot.set_profiler_dynamics(cur_accel + kStepAccel, 4.5f, 0.8f);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Accel = %.1f m/s²", cur_accel + kStepAccel);
-    toast_timer = 2.0f;
-  } else if (IsKeyPressed(KEY_Z)) {
-    robot.set_profiler_dynamics(cur_accel - kStepAccel, 4.5f, 0.8f);
-    (void)snprintf(toast_msg, toast_size, "TUNING: Accel = %.1f m/s²", cur_accel - kStepAccel);
-    toast_timer = 2.0f;
-  }
 }
 
 void handle_camera_hotkeys(Rectangle view_rect, Camera2D& camera, float ui_scale,
@@ -480,10 +405,195 @@ void switch_to_track_manifest(size_t next_idx, size_t& current_idx,
   toast_timer = 3.5f;
 }
 
+bool handle_tuning_action(lf::sim::GuiAction gui_act, lf::sim::SimEngine& engine,
+                          const lf::sim::TrackManifest& manifest, char* toast_buf,
+                          size_t toast_buf_len, float& toast_timer) {
+  auto& robot = engine.get_robot_mut();
+  auto& state = engine.get_state_mut();
+
+  switch (gui_act) {
+    case lf::sim::GuiAction::kToggleTuningDrawer: {
+      state.is_tuning_drawer_open = !state.is_tuning_drawer_open;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneKpUp: {
+      float kp = 0.0f;
+      float ki = 0.0f;
+      float kd = 0.0f;
+      robot.get_line_pid_gains(kp, ki, kd);
+      robot.set_line_pid_gains(kp + 0.005f, ki, kd);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Kp = %.4f", kp + 0.005f);
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneKpDown: {
+      float kp = 0.0f;
+      float ki = 0.0f;
+      float kd = 0.0f;
+      robot.get_line_pid_gains(kp, ki, kd);
+      robot.set_line_pid_gains(std::max(0.0f, kp - 0.005f), ki, kd);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Kp = %.4f", std::max(0.0f, kp - 0.005f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneKdUp: {
+      float kp = 0.0f;
+      float ki = 0.0f;
+      float kd = 0.0f;
+      robot.get_line_pid_gains(kp, ki, kd);
+      robot.set_line_pid_gains(kp, ki, kd + 0.001f);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Kd = %.4f", kd + 0.001f);
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneKdDown: {
+      float kp = 0.0f;
+      float ki = 0.0f;
+      float kd = 0.0f;
+      robot.get_line_pid_gains(kp, ki, kd);
+      robot.set_line_pid_gains(kp, ki, std::max(0.0f, kd - 0.001f));
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Kd = %.4f", std::max(0.0f, kd - 0.001f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneVmapUp: {
+      const float v_sprint = robot.get_config().profiler.max_straight_speed_mps;
+      const float v_map = robot.get_config().profiler.safe_map_speed_mps;
+      robot.set_tactical_speeds(std::min(1.50f, v_map + 0.05f), v_sprint);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Map V = %.2f m/s",
+                     std::min(1.50f, v_map + 0.05f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneVmapDown: {
+      const float v_sprint = robot.get_config().profiler.max_straight_speed_mps;
+      const float v_map = robot.get_config().profiler.safe_map_speed_mps;
+      robot.set_tactical_speeds(std::max(0.20f, v_map - 0.05f), v_sprint);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Map V = %.2f m/s",
+                     std::max(0.20f, v_map - 0.05f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneVsprintUp: {
+      const float v_sprint = robot.get_config().profiler.max_straight_speed_mps;
+      const float v_map = robot.get_config().profiler.safe_map_speed_mps;
+      robot.set_tactical_speeds(v_map, std::min(4.00f, v_sprint + 0.10f));
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Sprint V = %.2f m/s",
+                     std::min(4.00f, v_sprint + 0.10f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneVsprintDown: {
+      const float v_sprint = robot.get_config().profiler.max_straight_speed_mps;
+      const float v_map = robot.get_config().profiler.safe_map_speed_mps;
+      robot.set_tactical_speeds(v_map, std::max(0.50f, v_sprint - 0.10f));
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Sprint V = %.2f m/s",
+                     std::max(0.50f, v_sprint - 0.10f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneAccelUp: {
+      const float accel = robot.get_config().profiler.max_accel_mps2;
+      robot.set_profiler_dynamics(accel + 0.50f, 4.5f, 0.8f);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Accel = %.1f m/s²", accel + 0.50f);
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneAccelDown: {
+      const float accel = robot.get_config().profiler.max_accel_mps2;
+      robot.set_profiler_dynamics(std::max(1.0f, accel - 0.50f), 4.5f, 0.8f);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Accel = %.1f m/s²",
+                     std::max(1.0f, accel - 0.50f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneObsClearUp: {
+      float obs_dist = 0.0f;
+      float obs_clear = 0.0f;
+      float obs_len = 0.0f;
+      robot.get_obstacle_parameters(obs_dist, obs_clear, obs_len);
+      robot.set_obstacle_parameters(obs_dist, obs_clear + 0.01f, obs_len);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Y_clear = %.2f m", obs_clear + 0.01f);
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneObsClearDown: {
+      float obs_dist = 0.0f;
+      float obs_clear = 0.0f;
+      float obs_len = 0.0f;
+      robot.get_obstacle_parameters(obs_dist, obs_clear, obs_len);
+      robot.set_obstacle_parameters(obs_dist, std::max(0.05f, obs_clear - 0.01f), obs_len);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Y_clear = %.2f m",
+                     std::max(0.05f, obs_clear - 0.01f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneJerkUp: {
+      float max_dev = 0.0f;
+      float jerk = 0.0f;
+      robot.get_optimizer_params(max_dev, jerk);
+      robot.set_optimizer_params(max_dev, std::min(0.50f, jerk + 0.01f));
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Jerk Damp w = %.3f",
+                     std::min(0.50f, jerk + 0.01f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneJerkDown: {
+      float max_dev = 0.0f;
+      float jerk = 0.0f;
+      robot.get_optimizer_params(max_dev, jerk);
+      robot.set_optimizer_params(max_dev, std::max(0.005f, jerk - 0.01f));
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Jerk Damp w = %.3f",
+                     std::max(0.005f, jerk - 0.01f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneCorridorUp: {
+      float max_dev = 0.0f;
+      float jerk = 0.0f;
+      robot.get_optimizer_params(max_dev, jerk);
+      robot.set_optimizer_params(std::min(120.0f, max_dev + 5.0f), jerk);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Max Dev = %.0f mm",
+                     std::min(120.0f, max_dev + 5.0f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTuneCorridorDown: {
+      float max_dev = 0.0f;
+      float jerk = 0.0f;
+      robot.get_optimizer_params(max_dev, jerk);
+      robot.set_optimizer_params(std::max(0.0f, max_dev - 5.0f), jerk);
+      (void)snprintf(toast_buf, toast_buf_len, "TUNING: Max Dev = %.0f mm",
+                     std::max(0.0f, max_dev - 5.0f));
+      toast_timer = 2.0f;
+      return true;
+    }
+    case lf::sim::GuiAction::kTriggerLiveReopt: {
+      if (!engine.has_trajectory_data()) {
+        (void)snprintf(toast_buf, toast_buf_len,
+                       "NOTICE: Run [1] MAP first to record track path before optimizing!");
+        toast_timer = 3.5f;
+      } else {
+        engine.recompute_racing_trajectory(manifest.start_x, manifest.start_y);
+        (void)snprintf(toast_buf, toast_buf_len,
+                       "LIVE RE-OPTIMIZE: Minimum-Curvature C2 QP Recalculated!");
+        toast_timer = 3.0f;
+      }
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
 void handle_gui_action(lf::sim::GuiAction gui_act, lf::sim::SimEngine& engine,
                        lf::sim::TrackManifest& manifest, const std::string& manifest_path,
                        bool& follow_robot, bool& is_user_zoomed, char* toast_buf,
                        size_t toast_buf_len, float& toast_timer) {
+  if (handle_tuning_action(gui_act, engine, manifest, toast_buf, toast_buf_len, toast_timer)) {
+    return;
+  }
+
   const auto& robot = engine.get_robot();
   auto& state = engine.get_state_mut();
   const float th_rad = manifest.start_theta_deg * (lf::constants::kPi / 180.0f);
@@ -727,8 +837,9 @@ void render_simulation_canvas(const lf::sim::SimEngine& engine, const Camera2D& 
   lf::sim::draw_start_and_finish_zones(manifest.start_x, manifest.start_y, manifest.start_theta_deg,
                                        manifest.finish_box.min_x_mm, manifest.finish_box.max_x_mm,
                                        manifest.finish_box.min_y_mm, manifest.finish_box.max_y_mm);
-  lf::sim::draw_trajectory_comparison(state.unoptimized_trail, state.planned_trajectory,
-                                      config.profiler.max_straight_speed_mps);
+  lf::sim::draw_trajectory_comparison(
+    state.unoptimized_trail, state.planned_trajectory,
+    engine.get_robot().get_config().profiler.max_straight_speed_mps);
   lf::sim::draw_robot_trail(state.trail, cur_mode);
   lf::sim::draw_robot_chassis(state.x, state.y, state.theta, engine.get_bar_center_x(),
                               engine.get_bar_center_y(), config.kinematics.wheel_base_m,
@@ -744,6 +855,57 @@ void render_simulation_canvas(const lf::sim::SimEngine& engine, const Camera2D& 
 
   EndMode2D();
   EndScissorMode();
+}
+
+Font load_extended_unicode_font(const char* font_path, int font_size) {
+  if (!FileExists(font_path)) {
+    return GetFontDefault();
+  }
+
+  // Construct codepoints array for full ASCII, Latin Extended (Vietnamese), and technical symbols
+  std::vector<int> codepoints;
+  codepoints.reserve(1024);
+
+  // 1. Basic Latin & ASCII (32 .. 126)
+  for (int cp = 32; cp <= 126; ++cp) {
+    codepoints.push_back(cp);
+  }
+
+  // 2. Latin-1 Supplement (160 .. 255)
+  for (int cp = 160; cp <= 255; ++cp) {
+    codepoints.push_back(cp);
+  }
+
+  // 3. Latin Extended-A & B (256 .. 591)
+  for (int cp = 256; cp <= 591; ++cp) {
+    codepoints.push_back(cp);
+  }
+
+  // 4. Vietnamese Tone Marks: Latin Extended Additional (0x1EA0 .. 0x1EF9)
+  for (int cp = 0x1EA0; cp <= 0x1EF9; ++cp) {
+    codepoints.push_back(cp);
+  }
+
+  // 5. General Punctuation & Currency (0x2010 .. 0x2027, 0x20AB)
+  for (int cp = 0x2010; cp <= 0x2027; ++cp) {
+    codepoints.push_back(cp);
+  }
+  codepoints.push_back(0x20AB);  // ₫
+
+  // 6. Arrows & Mathematical Symbols
+  codepoints.push_back(0x2190);  // ←
+  codepoints.push_back(0x2191);  // ↑
+  codepoints.push_back(0x2192);  // →
+  codepoints.push_back(0x2193);  // ↓
+  codepoints.push_back(0x00B1);  // ±
+  codepoints.push_back(0x00B0);  // °
+  codepoints.push_back(0x00B2);  // ²
+  codepoints.push_back(0x00B3);  // ³
+
+  Font font =
+    LoadFontEx(font_path, font_size, codepoints.data(), static_cast<int>(codepoints.size()));
+  SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
+  return font;
 }
 
 }  // namespace
@@ -775,12 +937,21 @@ int main() {
   Font font_bold = GetFontDefault();
   Font font_mono = GetFontDefault();
   bool has_custom_fonts = false;
-  if (FileExists("assets/fonts/Inter-Bold.ttf") &&
-      FileExists("assets/fonts/JetBrainsMono-Regular.ttf")) {
-    font_bold = LoadFontEx("assets/fonts/Inter-Bold.ttf", 36, nullptr, 0);
-    font_mono = LoadFontEx("assets/fonts/JetBrainsMono-Regular.ttf", 32, nullptr, 0);
-    SetTextureFilter(font_bold.texture, TEXTURE_FILTER_BILINEAR);
-    SetTextureFilter(font_mono.texture, TEXTURE_FILTER_BILINEAR);
+  const char* font_bold_path = nullptr;
+  if (FileExists("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf")) {
+    font_bold_path = "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf";
+  } else if (FileExists("/usr/share/fonts/TTF/DejaVuSans.ttf")) {
+    font_bold_path = "/usr/share/fonts/TTF/DejaVuSans.ttf";
+  }
+
+  const char* font_mono_path = nullptr;
+  if (FileExists("/usr/share/fonts/TTF/DejaVuSansMono.ttf")) {
+    font_mono_path = "/usr/share/fonts/TTF/DejaVuSansMono.ttf";
+  }
+
+  if (font_bold_path != nullptr && font_mono_path != nullptr) {
+    font_bold = load_extended_unicode_font(font_bold_path, 44);
+    font_mono = load_extended_unicode_font(font_mono_path, 38);
     has_custom_fonts = true;
   }
 
@@ -813,7 +984,9 @@ int main() {
   while (!WindowShouldClose()) {
     const int screen_w = GetScreenWidth();
     const int screen_h = GetScreenHeight();
-    const float ui_scale = std::clamp(static_cast<float>(screen_h) / 1080.0f, 0.70f, 1.60f);
+    const float scale_h = static_cast<float>(screen_h) / 1080.0f;
+    const float scale_w = static_cast<float>(screen_w) / 1920.0f;
+    const float ui_scale = std::clamp(std::max(scale_h, scale_w * 0.85f), 0.85f, 2.40f);
 
     // Full-bleed 100% canvas viewport (zero-friction hallmark HUD)
     const auto view_w = static_cast<float>(screen_w);
@@ -830,8 +1003,6 @@ int main() {
                         manifest_paths.at(current_manifest_idx), follow_robot, is_user_zoomed,
                         toast_msg.data(), toast_msg.size(), toast_timer);
     }
-    handle_parameter_tuning_hotkeys(engine.get_robot_mut(), toast_msg.data(), toast_msg.size(),
-                                    toast_timer);
     handle_camera_hotkeys(view_rect, camera, ui_scale, engine, follow_robot, is_user_zoomed,
                           track_w, track_h);
     handle_mouse_interactions(view_rect, camera, engine, current_manifest,

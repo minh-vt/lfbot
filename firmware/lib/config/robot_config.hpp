@@ -28,14 +28,17 @@ struct EnvironmentConfig {
 };
 
 struct KinematicsConfig {
-  float wheel_diameter_m = 0.034f;
+  float meters_per_tick_scale = 0.00019074f;  // Nominal calibrated: (0.034m * pi) / 560 ticks
   float wheel_base_m = 0.115f;
   float sensor_lookahead_m = 0.055f;
-  float ticks_per_revolution = 560.0f;
 
-  [[nodiscard]] constexpr float meters_per_tick() const {
-    return (constants::kPi * wheel_diameter_m) / ticks_per_revolution;
+  void calibrate(float distance_m, int32_t ticks) {
+    if (distance_m > 0.0f && ticks > 0) {
+      meters_per_tick_scale = distance_m / static_cast<float>(ticks);
+    }
   }
+
+  [[nodiscard]] constexpr float meters_per_tick() const { return meters_per_tick_scale; }
 };
 
 struct LineSensorConfig {
@@ -43,10 +46,7 @@ struct LineSensorConfig {
   float line_presence_threshold = 0.15f;
   float finish_line_threshold = 0.75f;
   int min_finish_eyes = 7;
-  float cross_marker_threshold = 0.45f;
-  int cross_marker_min_eyes = 6;
   float branch_cluster_threshold = 0.35f;
-  float optical_confidence_k = 10.0f;
 
   // Trọng số vị trí hình học của 8 cảm biến:
   // Với 8 mắt đối xứng qua tâm x = 0 và bước mắt d = 9.0 mm:
@@ -80,8 +80,6 @@ struct ObstacleConfig {
   float evasion_cooldown_duration_s = 1.0f;
   float recovery_speed_mps = 0.35f;
   float recovery_steer_rad = 0.12f;
-  float repulsion_gain = 0.10f;
-  float side_tof_repulsion_gain = 0.05f;
 };
 
 struct ProfilerConfig {
@@ -99,8 +97,7 @@ struct TrackingConfig {
   float finish_zone_length_m = 0.125f;
   float finish_debounce_time_s = 0.035f;
   float finish_speed_factor = 0.5f;
-  float line_loss_timeout_s = 0.50f;
-  float inertial_decay_lambda = 2.0f;
+  float line_loss_timeout_s = 0.30f;
 };
 
 struct RobotConfig {

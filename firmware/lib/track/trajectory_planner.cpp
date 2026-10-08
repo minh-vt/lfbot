@@ -12,10 +12,18 @@ constexpr float kCorridorMaxDeviationMm = 15.0f;
 
 }  // namespace
 
-TrajectoryPlanner::TrajectoryPlanner() : env_(EnvironmentConfig{}), profiler_(ProfilerConfig{}) {}
+TrajectoryPlanner::TrajectoryPlanner()
+  : env_(EnvironmentConfig{}), profiler_(ProfilerConfig{}), opt_cfg_(OptimizationConfig{}) {
+  opt_cfg_.obstacle_margin_mm = 30.0f;
+}
 
-TrajectoryPlanner::TrajectoryPlanner(const EnvironmentConfig& env, const ProfilerConfig& profiler)
-  : env_(env), profiler_(profiler) {}
+TrajectoryPlanner::TrajectoryPlanner(const EnvironmentConfig& env, const ProfilerConfig& profiler,
+                                     const OptimizationConfig& opt_cfg)
+  : env_(env), profiler_(profiler), opt_cfg_(opt_cfg) {
+  if (opt_cfg_.obstacle_margin_mm < 1.0f) {
+    opt_cfg_.obstacle_margin_mm = 30.0f;
+  }
+}
 
 void TrajectoryPlanner::profile_speeds(std::vector<TrajectoryPoint>& path,
                                        const std::vector<ObstacleGeometry>& obstacles) const {
@@ -52,14 +60,22 @@ void TrajectoryPlanner::profile_speeds(std::vector<TrajectoryPoint>& path,
     const float curvature = std::clamp(raw_k, -kMaxCurvatureRadM, kMaxCurvatureRadM);
     path.at(i).curvature_rad_m = curvature;
 
-    // Cornering grip speed: v_grip = sqrt(mu * g / max(|curvature|, epsilon))
+    // 1. Friction Grip Limit (Kamm's Circle): v_grip = sqrt(mu * g / max(|curvature|, epsilon))
     float v_grip = v_top;
     const float abs_k = std::abs(curvature);
     if (abs_k > 0.05f) {
       v_grip = std::sqrt(mu_g / abs_k);
     }
 
-    float v_limit = std::min(v_top, v_grip);
+    // 2. Continuous Differential Drive Kinodynamic Saturation Limit:
+    // Angular velocity omega = v * kappa. The outer wheel speed v_outer = v * (1 + 0.5 * |kappa| *
+    // W). As curvature grows, differential kinematics continuously scales speed down to prevent
+    // motor saturation and understeer, without arbitrary piecewise if-else thresholds.
+    constexpr float kWheelBaseM = 0.115f;
+    const float diff_ratio = (v_safe > 0.001f) ? (v_top / v_safe) : 1.0f;
+    const float v_diff_limit = v_top / (1.0f + diff_ratio * abs_k * kWheelBaseM);
+
+    float v_limit = std::min({v_top, v_grip, v_diff_limit});
     constexpr float kObsSlowZoneRadiusMm = 320.0f;
     constexpr float kMaxSpeedNearObsMps = 1.05f;
     for (const auto& obs : obstacles) {
@@ -110,10 +126,7 @@ std::vector<TrajectoryPoint> TrajectoryPlanner::generate_racing_line(
   }
 
   // Global Convex QP Optimization (Seam 1)
-  OptimizationConfig opt_cfg{};
-  opt_cfg.max_lateral_deviation_mm = kCorridorMaxDeviationMm;
-  opt_cfg.obstacle_margin_mm = 30.0f;
-  const GlobalTrajectoryOptimizer optimizer(opt_cfg);
+  const GlobalTrajectoryOptimizer optimizer(opt_cfg_);
   auto optimized = optimizer.optimize(raw_path, obstacles, env_);
 
   // Time-Optimal Forward-Backward Dynamic Programming Velocity Profiling (Seam 2)

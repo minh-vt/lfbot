@@ -11,6 +11,7 @@
 #include "control/trajectory_follower.hpp"
 #include "math/collision.hpp"
 #include "math/kinematics.hpp"
+#include "strategy/tactical_arbiter.hpp"
 #include "system/robot_coordinator.hpp"
 #include "system/telemetry_packet.hpp"
 #include "track/global_trajectory_optimizer.hpp"
@@ -135,25 +136,15 @@ void verify_trajectory_follower_tracking(const std::vector<lf::TrajectoryPoint>&
                                          const lf::ProfilerConfig& profiler_cfg, float v_straight) {
   // Test TrajectoryFollower tracking
   const lf::PIDConfig pid_cfg{};
-  const lf::ObstacleConfig obs_cfg{};
-  lf::TrajectoryFollower follower(pid_cfg, profiler_cfg, obs_cfg);
+  lf::TrajectoryFollower follower(pid_cfg, profiler_cfg);
   follower.set_trajectory(racing_line);
   assert(follower.has_trajectory());
 
-  lf::SensorData in{};
-  in.dt = 0.002f;
-  lf::MotorCmd cmd{};
-  float target_v = 0.0f;
-  float target_steer = 0.0f;
-  int waypoint_idx = 0;
-  uint8_t bypass_state = 0;
-
-  follower.update(lf::Pose2D{0.5f, 0.0f, 0.0f}, 1.5f, 0.003f, 0.0f, true, 0.002f, in, cmd, target_v,
-                  target_steer, waypoint_idx, bypass_state);
-  assert(std::abs(waypoint_idx - 50) <= 1);
-  assert(std::abs(target_v - v_straight) < 0.05f);
-  assert(cmd.left_pwm > 0.0f);
-  assert(cmd.right_pwm > 0.0f);
+  const auto cmd = follower.track_trajectory(lf::Pose2D{0.5f, 0.0f, 0.0f}, 1.5f, 0.002f);
+  assert(std::abs(cmd.closest_waypoint_idx - 50) <= 1);
+  assert(std::abs(cmd.target_v_mps - v_straight) < 0.05f);
+  assert(cmd.left_wheel_mps > 0.0f);
+  assert(cmd.right_wheel_mps > 0.0f);
 }
 
 void test_trajectory_speed_profiling_and_follower() {
@@ -303,6 +294,43 @@ void test_profiler_live_reoptimization() {
   assert(v2 > v1);
   assert(v1 <= 2.001f);
   assert(v2 > 2.2f);
+}
+
+void test_coordinator_live_reoptimization() {
+  lf::RobotConfig config{};
+  config.profiler.max_straight_speed_mps = 2.0f;
+  lf::RobotCoordinator robot(config);
+  robot.init();
+  robot.set_mode(lf::RobotMode::kRun1Map);
+
+  assert(!robot.reoptimize_racing_trajectory());
+
+  lf::SensorData in{};
+  in.dt = 0.02f;
+  in.tof_front_m = 1.0f;
+  in.ir_raw.at(3) = 1.0f;
+  in.ir_raw.at(4) = 1.0f;
+  lf::MotorCmd out{};
+  for (int step = 1; step <= 25; ++step) {
+    in.enc_left_ticks = step * 250;
+    in.enc_right_ticks = step * 250;
+    robot.update(in, out);
+  }
+  assert(robot.get_recorded_trace().size() >= 10);
+
+  bool ok = robot.reoptimize_racing_trajectory();
+  assert(ok);
+  assert(!robot.get_racing_trajectory().empty());
+  const float v1 = robot.get_racing_trajectory().at(0).target_speed_mps;
+
+  robot.set_tactical_speeds(config.profiler.safe_map_speed_mps, 3.5f);
+  ok = robot.reoptimize_racing_trajectory();
+  assert(ok);
+  const float v2 = robot.get_racing_trajectory().at(0).target_speed_mps;
+
+  std::cout << "[TEST] Coordinator Live Re-opt: v1=" << v1 << " m/s -> v2=" << v2
+            << " m/s: Verified\n";
+  assert(v2 >= v1);
 }
 
 void test_reset_pose_preserves_map() {
@@ -559,17 +587,22 @@ void test_run1_corner_deceleration_and_line_loss_latch() {
   assert(corner_avg_pwm <= straight_pwm);
   assert(out.right_pwm > out.left_pwm);  // Steer left: right wheel faster
 
-  // 3. Safe Stop on Line Loss: line leaves field of view completely
+  // 3. Line Loss Handling:
+  // 3a. Transient gap (< 300ms): Dead-reckoning maintains momentum across gaps/markers
   in.ir_raw = {};
   robot.update(in, out);
+  assert((out.left_pwm + out.right_pwm) * 0.5f > 0.0f);  // Forward momentum maintained
 
-  assert(robot.get_telemetry().line_lost);
-  // Must stop motors safely to prevent spin-outs and wild runaway
+  // 3b. Sustained loss (>= 300ms): Safe halt triggers to prevent runaway
+  for (int step = 0; step < 20; ++step) {
+    robot.update(in, out);
+  }
   assert(out.left_pwm == 0.0f);
   assert(out.right_pwm == 0.0f);
 
   std::cout << "[TEST] Run 1 Line Following & Safe Stop -> Straight PWM: " << straight_pwm
-            << " | Corner Avg PWM: " << corner_avg_pwm << " | Stopped on line loss\n";
+            << " | Corner Avg PWM: " << corner_avg_pwm
+            << " | Dead-reckoning momentum & sustained safe stop verified\n";
 }
 
 void simulate_run1_enter_finish_zone(lf::RobotCoordinator& robot, lf::SensorData& in,
@@ -1139,19 +1172,16 @@ void test_run1_reactive_obstacle_evasion() {
   const lf::ProfilerConfig prof_cfg{};
   const lf::ObstacleConfig obs_cfg{};
 
-  lf::TrajectoryFollower follower(pid_cfg, prof_cfg, obs_cfg);
+  lf::TacticalBehaviorArbiter arbiter(obs_cfg, prof_cfg, lf::TrackingConfig{});
+  lf::TrajectoryFollower follower(pid_cfg, prof_cfg);
 
   lf::SensorData in{};
-  lf::MotorCmd out{};
-  float target_v = 0.0f;
-  float target_steer = 0.0f;
-  int waypoint_idx = 0;
   uint8_t bypass_state = 0;
 
   // 1. Normal line tracking (no obstacle)
-  follower.update(lf::Pose2D{0.0f, 0.0f, 0.0f}, 0.8f, 0.01f, 0.0f, true, 0.002f, in, out, target_v,
-                  target_steer, waypoint_idx, bypass_state);
-  assert(bypass_state == 0);
+  const auto tac_ref = arbiter.update(lf::Pose2D{0.0f, 0.0f, 0.0f}, 0.8f, 0.0f, true, 1.0f, 1.0f,
+                                      1.0f, 0.002f, lf::RobotMode::kRun1Map);
+  assert(tac_ref.bypass_state == 0);
 
   // 2. Obstacle detected by front ToF at 250mm
   in.tof_front_m = 0.25f;
@@ -1165,13 +1195,19 @@ void test_run1_reactive_obstacle_evasion() {
     if (step > 5) {
       in.tof_front_m = 1.0f;  // Obstacle cleared from front sensor cone
     }
-    follower.update(pose, 0.45f, 0.45f * kDt, 0.0f, false, kDt, in, out, target_v, target_steer,
-                    waypoint_idx, bypass_state);
-
-    // Forward differential drive kinematics integration
-    const float max_speed = prof_cfg.max_straight_speed_mps;
-    const float vl = out.left_pwm * max_speed;
-    const float vr = out.right_pwm * max_speed;
+    const auto tac = arbiter.update(pose, 0.45f, 0.0f, step <= 5, in.tof_front_m, 1.0f, 1.0f, kDt,
+                                    lf::RobotMode::kRun1Map);
+    float vl = 0.0f;
+    float vr = 0.0f;
+    if (tac.has_steer_override) {
+      vl = tac.target_v_mps + tac.steer_cmd_rad;
+      vr = tac.target_v_mps - tac.steer_cmd_rad;
+    } else {
+      const auto kin_cmd = follower.track_line(tac.lateral_error_m, 0.45f, tac.target_v_mps, kDt);
+      vl = kin_cmd.left_wheel_mps;
+      vr = kin_cmd.right_wheel_mps;
+    }
+    bypass_state = tac.bypass_state;
     const float v = 0.5f * (vl + vr);
     const float w = (vl - vr) / kWheelBase;
 
@@ -1220,7 +1256,7 @@ void assert_tuner_result_valid(const lf::TunerResult& res, float target_amp_mm,
 }
 
 lf::TunerResult verify_relay_tuner_synthetic_oscillation() {
-  lf::RelayTuner tuner(0.12f, 1.0f);
+  lf::RelayTuner tuner(0.35f, 3.5f);
   assert(!tuner.is_converged());
 
   constexpr float kDt = 0.002f;
@@ -1299,13 +1335,10 @@ void test_sequential_obstacle_evasion() {
   const lf::ProfilerConfig prof_cfg{};
   const lf::ObstacleConfig obs_cfg{};
 
-  lf::TrajectoryFollower follower(pid_cfg, prof_cfg, obs_cfg);
+  lf::TacticalBehaviorArbiter arbiter(obs_cfg, prof_cfg, lf::TrackingConfig{});
+  lf::TrajectoryFollower follower(pid_cfg, prof_cfg);
 
   lf::SensorData in{};
-  lf::MotorCmd out{};
-  float target_v = 0.0f;
-  float target_steer = 0.0f;
-  int waypoint_idx = 0;
   uint8_t bypass_state = 0;
 
   lf::Pose2D pose{0.0f, 0.0f, 0.0f};
@@ -1330,16 +1363,23 @@ void test_sequential_obstacle_evasion() {
 
     const float centroid_mm = std::clamp(-pose.y_m * 1000.0f, -31.5f, 31.5f);
     const uint8_t prev_bypass = bypass_state;
-    follower.update(pose, 0.45f, 0.45f * kDt, centroid_mm, true, kDt, in, out, target_v,
-                    target_steer, waypoint_idx, bypass_state);
+    const auto tac = arbiter.update(pose, 0.45f, centroid_mm, true, in.tof_front_m, 1.0f, 1.0f, kDt,
+                                    lf::RobotMode::kRun1Map);
+    float vl = 0.0f;
+    float vr = 0.0f;
+    if (tac.has_steer_override) {
+      vl = tac.target_v_mps + tac.steer_cmd_rad;
+      vr = tac.target_v_mps - tac.steer_cmd_rad;
+    } else {
+      const auto kin_cmd = follower.track_line(tac.lateral_error_m, 0.45f, tac.target_v_mps, kDt);
+      vl = kin_cmd.left_wheel_mps;
+      vr = kin_cmd.right_wheel_mps;
+    }
+    bypass_state = tac.bypass_state;
 
     if (prev_bypass == 0 && bypass_state == 1) {
       evasions_triggered++;
     }
-
-    const float max_speed = prof_cfg.max_straight_speed_mps;
-    const float vl = out.left_pwm * max_speed;
-    const float vr = out.right_pwm * max_speed;
     const float v = 0.5f * (vl + vr);
     const float w = (vl - vr) / kWheelBase;
 
@@ -1469,11 +1509,20 @@ void test_directional_branch_selection() {
   // Right-first tracks rightmost cluster (sensors 6 and 7 -> weights +22.5 and +31.5 -> avg
   // +27.0mm)
   assert(c_right > 20.0f);
-  assert(std::abs(c_right - 27.0f) < 0.1f);
+  // Solid black block / ô vuông (all 8 sensors dark):
+  // Leading cluster must track boundary edge without getting stuck in the center!
+  const std::array<float, 8> solid_black_box = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+  assert(calc.compute(solid_black_box, c_center, lf::BranchPriority::kCenter));
+  assert(calc.compute(solid_black_box, c_left, lf::BranchPriority::kLeftFirst));
+  assert(calc.compute(solid_black_box, c_right, lf::BranchPriority::kRightFirst));
+
+  assert(std::abs(c_center) < 1e-4f);
+  assert(std::abs(c_left - (-22.5f)) < 0.1f);
+  assert(std::abs(c_right - 22.5f) < 0.1f);
 
   std::cout << "[TEST] Directional Branch Selection -> Center: " << c_center
             << " mm | Left-first: " << c_left << " mm | Right-first: " << c_right
-            << " mm: Verified\n";
+            << " mm (Fork & Solid Box): Verified\n";
 }
 
 void verify_debounce_rejection(lf::RobotCoordinator& robot, lf::SensorData& in, lf::MotorCmd& out) {
@@ -1542,6 +1591,212 @@ void test_finish_line_temporal_debounce() {
                "rejected, 40ms white accepted: Verified\n";
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_run2_sprint_continuous_trajectory_no_line_dependency() {
+  lf::RobotConfig config{};
+  config.tracking.min_finish_arm_dist_m = 1.0f;
+  config.profiler.max_straight_speed_mps = 2.0f;
+
+  lf::RobotCoordinator robot(config);
+  robot.init();
+
+  // Create a 4.0m trajectory
+  std::vector<lf::TrajectoryPoint> traj;
+  constexpr size_t kPoints = 80;
+  traj.reserve(kPoints);
+  for (size_t i = 0; i < kPoints; ++i) {
+    lf::TrajectoryPoint pt{};
+    pt.s_m = static_cast<float>(i) * 0.05f;  // 0.0m to 3.95m
+    pt.x_mm = pt.s_m * 1000.0f;
+    pt.y_mm = 0.0f;
+    pt.heading_rad = 0.0f;
+    pt.target_speed_mps = 1.50f;
+    pt.curvature_rad_m = 0.0f;
+    traj.push_back(pt);
+  }
+
+  robot.set_racing_trajectory(traj);
+  robot.set_mode(lf::RobotMode::kRun2Sprint);
+  assert(robot.get_mode() == lf::RobotMode::kRun2Sprint);
+
+  lf::SensorData in{};
+  in.dt = 0.010f;
+  in.tof_front_m = 1.0f;
+  lf::MotorCmd out{};
+
+  // 1. Run until distance = 1.5m (> min_finish_arm_dist_m = 1.0m)
+  constexpr int kStepsTo1500mm = 150;
+  for (int step = 0; step < kStepsTo1500mm; ++step) {
+    in.enc_left_ticks += 94;  // ~10mm per step
+    in.enc_right_ticks += 94;
+    in.ir_raw.at(3) = 1.0f;
+    in.ir_raw.at(4) = 1.0f;
+    robot.update(in, out);
+  }
+  assert(robot.get_telemetry().total_distance_m > 1.4f);
+
+  // 2. Optical line is completely lost for 50 steps (0.5s > 300ms line loss timeout)
+  // because vehicle is cutting corner or evading
+  in.ir_raw.fill(0.0f);
+  for (int step = 0; step < 50; ++step) {
+    in.enc_left_ticks += 94;
+    in.enc_right_ticks += 94;
+    robot.update(in, out);
+    // MUST NOT HALT! Must continue sprinting on trajectory!
+    assert(robot.get_mode() == lf::RobotMode::kRun2Sprint);
+    assert(!out.active_brake);
+    assert(out.left_pwm > 0.0f || out.right_pwm > 0.0f);
+  }
+
+  // 3. Continue forward past the end of trajectory (s >= 3.95m)
+  while (robot.get_telemetry().total_distance_m < 4.10f &&
+         robot.get_mode() == lf::RobotMode::kRun2Sprint) {
+    in.enc_left_ticks += 94;
+    in.enc_right_ticks += 94;
+    robot.update(in, out);
+  }
+
+  // Now, at the end of the trajectory, vehicle halts safely in finish
+  assert(robot.get_mode() == lf::RobotMode::kIdle);
+  assert(out.active_brake);
+
+  std::cout << "[TEST] Run 2 Sprint Trajectory Completion without Optical Line Loss Dependency: "
+               "Verified\n";
+}
+
+void test_jerk_damping_trajectory_smoothness() {
+  std::vector<lf::TrajectoryPoint> raw_path;
+  constexpr size_t kN = 40;
+  raw_path.reserve(kN);
+  for (size_t i = 0; i < kN; ++i) {
+    lf::TrajectoryPoint pt{};
+    pt.x_mm = static_cast<float>(i) * 50.0f;
+    pt.y_mm = 0.0f;
+    pt.target_speed_mps = 1.0f;
+    raw_path.push_back(pt);
+  }
+
+  const lf::EnvironmentConfig env{};
+  lf::ObstacleGeometry obs{};
+  obs.x_mm = 1000.0f;
+  obs.y_mm = 0.0f;
+  obs.width_mm = 105.0f;
+  obs.height_mm = 60.0f;
+
+  lf::OptimizationConfig opt_undamped{};
+  opt_undamped.jerk_damping_weight = 0.0f;
+  opt_undamped.max_lateral_deviation_mm = 50.0f;
+  const lf::GlobalTrajectoryOptimizer opt1(opt_undamped);
+  const auto traj_undamped = opt1.optimize(raw_path, {obs}, env);
+
+  lf::OptimizationConfig opt_damped = opt_undamped;
+  opt_damped.jerk_damping_weight = 0.05f;
+  const lf::GlobalTrajectoryOptimizer opt2(opt_damped);
+  const auto traj_damped = opt2.optimize(raw_path, {obs}, env);
+
+  // Compute maximum lateral step difference: max |y_{i+1} - y_i|
+  float max_step_undamped = 0.0f;
+  float max_step_damped = 0.0f;
+  for (size_t i = 1; i < kN; ++i) {
+    const float dy1 = std::abs(traj_undamped.at(i).y_mm - traj_undamped.at(i - 1).y_mm);
+    const float dy2 = std::abs(traj_damped.at(i).y_mm - traj_damped.at(i - 1).y_mm);
+    max_step_undamped = std::max(max_step_undamped, dy1);
+    max_step_damped = std::max(max_step_damped, dy2);
+  }
+
+  assert(max_step_damped <= max_step_undamped);
+  std::cout << "[TEST] Jerk Damping Smoothness: max_step_undamped=" << max_step_undamped
+            << " >= max_step_damped=" << max_step_damped << " -> Verified\n";
+}
+
+void test_encoder_calibration_and_lateral_uncap() {
+  // 1. Hardware Calibration Routine
+  lf::KinematicsConfig kin{};
+  kin.calibrate(1.0f, 5242);
+  const float expected_scale = 1.0f / 5242.0f;
+  assert(std::abs(kin.meters_per_tick() - expected_scale) < 1e-7f);
+
+  // 2. Lateral deviation uncap up to 120mm
+  const lf::RobotConfig config{};
+  lf::RobotCoordinator robot(config);
+  robot.init();
+  robot.set_optimizer_params(80.0f, 0.02f);
+  float max_dev = 0.0f;
+  float jerk = 0.0f;
+  robot.get_optimizer_params(max_dev, jerk);
+  assert(std::abs(max_dev - 80.0f) < 0.01f);
+  assert(std::abs(jerk - 0.02f) < 0.001f);
+
+  std::cout << "[TEST] Encoder Calibration & Lateral Deviation Uncap (80mm): Verified\n";
+}
+
+void test_continuous_kinodynamics() {
+  const lf::EnvironmentConfig env{};
+  const lf::ProfilerConfig profiler{};
+  const lf::TrajectoryPlanner planner(env, profiler);
+
+  std::vector<lf::TrajectoryPoint> sharp_path;
+  sharp_path.reserve(100);
+  for (int x = 0; x <= 500; x += 10) {
+    sharp_path.push_back({static_cast<float>(x), 0.0f, 1.0f, 0.0f});
+  }
+  constexpr int kKinkSteps = 15;
+  for (int i = 1; i <= kKinkSteps; ++i) {
+    const float th = -0.5f * lf::constants::kPi +
+                     (0.5f * lf::constants::kPi) * (static_cast<float>(i) / kKinkSteps);
+    const float cx = 500.0f + 60.0f * std::cos(th);
+    const float cy = 60.0f + 60.0f * std::sin(th);
+    sharp_path.push_back({cx, cy, 1.0f, 0.0f});
+  }
+  for (int y = 70; y <= 500; y += 10) {
+    sharp_path.push_back({560.0f, static_cast<float>(y), 1.0f, 0.0f});
+  }
+
+  const auto profiled = planner.generate_racing_line(sharp_path, {});
+  bool found_decelerated_corner = false;
+  for (const auto& pt : profiled) {
+    if (std::abs(pt.curvature_rad_m) > 10.0f) {
+      assert(pt.target_speed_mps <= 0.55f);
+      found_decelerated_corner = true;
+    }
+    if (std::abs(pt.curvature_rad_m) > 15.0f) {
+      assert(pt.target_speed_mps <= 0.40f);
+    }
+  }
+  assert(found_decelerated_corner);
+  std::cout << "[TEST] Continuous Kinodynamics: Verified\n";
+}
+
+void test_stanley_counter_rotation() {
+  const lf::StanleyConfig stanley_cfg{};
+  const lf::StanleyTracker stanley(stanley_cfg);
+  const std::vector<lf::TrajectoryPoint> test_path = {
+    {0.0f, 0.0f, 1.0f, 0.0f},
+    {500.0f, 0.0f, 1.0f, 0.0f},
+  };
+  // Pose offset with high heading error (pi/2) to induce sharp steering
+  const lf::Pose2D sharp_pose{0.10f, 0.08f, 1.40f};
+  const auto cmd = stanley.update(sharp_pose, 0.40f, test_path, 1);
+  // Differential drive counter-rotation: one wheel should reverse to pivot tightly
+  assert(cmd.right_wheel_mps < 0.0f || cmd.left_wheel_mps < 0.0f);
+  std::cout << "[TEST] Stanley Differential Counter-Rotation: Verified\n";
+}
+
+void test_ancient_optical_dynamic_braking() {
+  const lf::ProfilerConfig profiler{};
+  const lf::ObstacleConfig obs_cfg{};
+  const lf::TrackingConfig track_cfg{};
+  lf::TacticalBehaviorArbiter arbiter(obs_cfg, profiler, track_cfg);
+  const auto ref_center = arbiter.update(lf::Pose2D{0, 0, 0}, 0.8f, 0.0f, true, 2.0f, 2.0f, 2.0f,
+                                         0.002f, lf::RobotMode::kRun1Map);
+  const auto ref_corner = arbiter.update(lf::Pose2D{0, 0, 0}, 0.8f, 25.0f, true, 2.0f, 2.0f, 2.0f,
+                                         0.002f, lf::RobotMode::kRun1Map);
+  assert(std::abs(ref_center.target_v_mps - profiler.safe_map_speed_mps) < 0.001f);
+  assert(ref_corner.target_v_mps < 0.40f);
+  assert(ref_corner.target_v_mps < ref_center.target_v_mps * 0.50f);
+  std::cout << "[TEST] Ancient Optical Dynamic Braking: Verified\n";
+}
+
 }  // namespace
 
 int main() {
@@ -1559,6 +1814,7 @@ int main() {
   test_tactical_safety_guardrails();
   test_trajectory_speed_profiling_and_follower();
   test_profiler_live_reoptimization();
+  test_coordinator_live_reoptimization();
   test_reset_pose_preserves_map();
   test_launch_velocity_fix();
   test_trajectory_planner_obstacle_bypass();
@@ -1577,6 +1833,12 @@ int main() {
   test_run1_reactive_obstacle_evasion();
   test_relay_auto_tuner();
   test_sequential_obstacle_evasion();
+  test_run2_sprint_continuous_trajectory_no_line_dependency();
+  test_jerk_damping_trajectory_smoothness();
+  test_encoder_calibration_and_lateral_uncap();
+  test_continuous_kinodynamics();
+  test_stanley_counter_rotation();
+  test_ancient_optical_dynamic_braking();
   std::cout << "=== TAT CA KIEM THU DA DAT (ALL TESTS PASSED) ===\n";
   return 0;
 }

@@ -22,11 +22,6 @@ public:
                              float& out_centroid_mm,
                              BranchPriority priority = BranchPriority::kCenter) const;
 
-  // Nhan dien vach ngang/nga tu/khối ô vuông (static để không phụ thuộc trạng thái)
-  [[nodiscard]] static bool is_cross_marker(
-    const std::array<float, LineSensorConfig::kSensorCount>& ir_raw, float threshold = 0.45f,
-    int min_eyes = 6);
-
   // Tính độ tin cậy quang học liên tục gamma in [0, 1]
   [[nodiscard]] static float compute_optical_confidence(float total_intensity, float threshold,
                                                         float k = 10.0f);

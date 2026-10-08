@@ -17,7 +17,7 @@ lfbot/
 │   ├── SPEC.md                # Ban dac ta ky thuat chi tiet
 │   ├── HARDWARE_GUIDE.md      # Huong dan mach in KiCAD va thiet ke co khi 3D
 │   ├── manual.md              # The le cuoc thi F-Maze-Solving
-│   └── decisions/             # Ho so quyet dinh kien truc (ADRs)
+│   └── decisions/             # Ho so quyet dinh kien truc (ADR-0001 den ADR-0008)
 ├── hardware/                  # Ho so thiet ke phan cung
 │   ├── pcb/                   # File mach in KiCAD
 │   └── mech/                  # Mo hinh in 3D (.step, .stl)
@@ -40,6 +40,8 @@ lfbot/
     │   │   ├── relay_tuner.hpp/.cpp
     │   │   ├── stanley_tracker.hpp/.cpp
     │   │   └── trajectory_follower.hpp/.cpp
+    │   ├── strategy/          # Chien thuat phan xa, ne vat can va an toan
+    │   │   └── tactical_arbiter.hpp/.cpp
     │   ├── track/             # Quy hoach quy dao va toi uu hinh hoc sa ban
     │   │   ├── global_trajectory_optimizer.hpp/.cpp
     │   │   └── trajectory_planner.hpp/.cpp
@@ -52,6 +54,7 @@ lfbot/
     │   │   ├── race_arbiter.hpp/.cpp # Trong tai thi dau so doc lap giam sat luat
     │   │   ├── raycast.hpp/.cpp # Giai toan re quat quang hoc 21 tia ToF vs OBB
     │   │   ├── sim_engine.hpp/.cpp # Dong co vat ly mo phong headless tach biet GUI
+    │   │   ├── theme.hpp      # Bang mau UI Glassmorphism & Cyberpunk SSoT
     │   │   ├── types.hpp      # Dinh nghia kieu du lieu va hang so mo phong
     │   │   ├── world.hpp/.cpp # Ve sa ban 2D, khung xe va cum cam bien
     │   │   └── main.cpp       # Orchestrator dieu phoi mo phong Raylib GUI
@@ -137,14 +140,14 @@ g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic \
   * `[Chuot phai + Keo]`: Di chuyen goc nhin camera (Pan).
   * `[Cuon chuot]`: Phong to hoac thu nho camera (Zoom).
 
-* Vi chinh tham so chien thuat thoi gian thuc:
-  * `[U] / [J]`: Tang hoac giam he so Kp cua Line PID (+/- 0.005).
-  * `[I] / [K]`: Tang hoac giam he so Kd cua Line PID (+/- 0.001).
-  * `[P] / [L]`: Tang hoac giam he so Ki cua Line PID (+/- 0.0001).
-  * `[E] / [D]`: Tang hoac giam van toc tham do Luot 1 V_map (+/- 0.10 m/s).
-  * `[W] / [S]`: Tang hoac giam van toc toi da Luot 2 V_sprint (+/- 0.20 m/s).
-  * `[A] / [Z]`: Tang hoac giam gia toc toi da A_max (+/- 0.5 m/s2).
-  * `[Y] / [H]`: Tang hoac giam cu ly phat hien vat can D_obs (+/- 0.02 m).
+* Tinh chinh tham so chien thuat truc quan (Cockpit HUD Tuning Drawer):
+  * Click chuot truc tiep vao cac nut `+` / `-` tren thanh Tuning Drawer duoi day man hinh:
+    * `Map V`: Van toc tham do Luot 1 ($[0.20, 1.50]\text{ m/s}$, buoc $\pm 0.05\text{ m/s}$).
+    * `Sprint V`: Van toc toi da Luot 2 ($[0.50, 4.00]\text{ m/s}$, buoc $\pm 0.10\text{ m/s}$).
+    * `Max Dev`: Hanh lang lech ngang toi da ($[0.0, 120.0]\text{ mm}$, buoc $\pm 5.0\text{ mm}$, mac dinh $80.0\text{ mm}$).
+    * `Jerk`: He so phat giat dao ham do cong ($[0.001, 0.100]$, buoc $\pm 0.005$, mac dinh $0.020$).
+  * Nut `[Optimize]`: Kich hoat tai toi uu hoa quy dao QP ngay lap tuc sau khi thay doi vat can hoac tham so.
+  * Nut `[Auto Tune]`: Kich hoat bo do tham so tu dong Relay Feedback Auto-Tuner de tim $K_p, K_d$ toi uu cho cam bien line.
 
 * Tuong tac vat can tren sa ban:
   * `[Chuot trai]`: Click len vi tri trong de dat vat can moi, hoac giu chuot tren vat can de keo tha den vi tri bat ky.
@@ -165,14 +168,12 @@ g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic \
 He thong ho tro bo kiem thu tu dong Headless khong can mo giao dien do hoa, hoan tat toan bo duoi 1.5 giay:
 
 ```bash
-# 1. Kiem thu toan bo unit tests giai thuat loi (< 0.3s)
+# 1. Kiem thu toan bo 41 unit tests giai thuat loi (< 1.5s)
 just test
 
-# 2. Kiem thu mo phong headless xuyen suot 2 luot chay va 6 adversarial tests (< 0.5s)
-just sim-test
-
-# 3. Kiem tra toan dien: format + lint + unit tests + sim-test (~ 1.1s)
-just check
+# 2. Kiem tra toan dien chat luong ma nguon (0 warning policy)
+just format-check # 100% tuan thu Google C++ Style
+just lint         # 0 loi, 0 canh bao tren 22 translation units
 ```
 
 ## 6. Kiem tra dinh dang ma nguon (Clang-Format)

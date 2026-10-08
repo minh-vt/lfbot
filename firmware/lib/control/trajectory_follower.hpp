@@ -10,10 +10,20 @@
 
 namespace lf {
 
+struct KinematicCmd {
+  float target_v_mps = 0.0f;
+  float steering_angle_rad = 0.0f;
+  float omega_rad_s = 0.0f;
+  float left_wheel_mps = 0.0f;
+  float right_wheel_mps = 0.0f;
+  int closest_waypoint_idx = 0;
+  float cross_track_error_m = 0.0f;
+  float heading_error_rad = 0.0f;
+};
+
 class TrajectoryFollower {
 public:
-  TrajectoryFollower(const PIDConfig& pid_cfg, const ProfilerConfig& prof_cfg,
-                     const ObstacleConfig& obs_cfg);
+  TrajectoryFollower(const PIDConfig& pid_cfg, const ProfilerConfig& prof_cfg);
 
   void reset();
   void set_trajectory(const std::vector<TrajectoryPoint>& trajectory);
@@ -24,15 +34,11 @@ public:
   [[nodiscard]] bool has_trajectory() const { return !trajectory_.empty(); }
   [[nodiscard]] const std::vector<TrajectoryPoint>& get_trajectory() const { return trajectory_; }
 
-  // Execute tracking step:
-  // - If global racing trajectory is available (Run 2):
-  //     Tracks time-optimal trajectory via continuous Stanley controller
-  //     Generates smooth steering angle and differential wheel speeds
-  // - If exploring line without trajectory (Run 1):
-  //     Tracks line via speed-scaled optical PID with corner deceleration
-  void update(const Pose2D& pose, float current_v_mps, float delta_dist_m, float centroid_mm,
-              bool line_found, float dt, const SensorData& in, MotorCmd& out, float& out_target_v,
-              float& out_target_steer, int& out_waypoint_idx, uint8_t& out_bypass_state);
+  // 1. Run 2 Sprint: Stanley tracking controller on global C^2 racing line
+  KinematicCmd track_trajectory(const Pose2D& pose, float current_v_mps, float dt);
+
+  // 2. Run 1 Map: Speed-scaled PID lateral tracking controller on optical / tactical error
+  KinematicCmd track_line(float lateral_error_m, float current_v_mps, float target_v_mps, float dt);
 
   [[nodiscard]] PIDController& get_pid() { return line_pid_; }
   [[nodiscard]] const PIDController& get_pid() const { return line_pid_; }
@@ -46,22 +52,12 @@ public:
     prof_cfg_.safe_map_speed_mps = safe_map_speed_mps;
   }
 
-  void apply_motor_drive(float v_target, float steer, MotorCmd& out) const;
-
+private:
   PIDController line_pid_;
   ProfilerConfig prof_cfg_;
-  ObstacleConfig obs_cfg_;
   StanleyTracker stanley_;
   std::vector<TrajectoryPoint> trajectory_;
   size_t last_index_ = 0;
-  bool is_evading_ = false;
-  float evasion_origin_x_ = 0.0f;
-  float evasion_origin_y_ = 0.0f;
-  float evasion_origin_th_ = 0.0f;
-  float evasion_side_sign_ = 1.0f;
-  float evasion_cooldown_s_ = 0.0f;
-  float current_bypass_length_m_ = 0.82f;
-  float current_bypass_speed_mps_ = 0.45f;
   float cross_track_error_m_ = 0.0f;
   float heading_error_rad_ = 0.0f;
 };

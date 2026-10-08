@@ -123,7 +123,7 @@ struct QPMatrix {
 };
 
 QPMatrix assemble_qp_system(size_t n, const CenterlineGeometry& geom, float curvature_weight,
-                            float reg_weight) {
+                            float reg_weight, float jerk_weight) {
   std::vector<float> a_k(n, 0.0f);
   std::vector<float> b_k(n, 0.0f);
 
@@ -162,6 +162,16 @@ QPMatrix assemble_qp_system(size_t n, const CenterlineGeometry& geom, float curv
       qp.f.at(i) += b_k.at(k);
     }
   }
+
+  if (jerk_weight > 0.0f) {
+    for (size_t i = 0; i + 1 < n; ++i) {
+      qp.h_diag.at(i) += jerk_weight;
+      qp.h_diag.at(i + 1) += jerk_weight;
+      qp.h_sub1.at(i + 1) += -jerk_weight;
+      qp.h_sup1.at(i) += -jerk_weight;
+    }
+  }
+
   return qp;
 }
 
@@ -266,7 +276,8 @@ std::vector<TrajectoryPoint> GlobalTrajectoryOptimizer::optimize(
   apply_obstacle_corridor_constraints(centerline, obstacles, env, geom, config_, alpha_min,
                                       alpha_max);
 
-  const QPMatrix qp = assemble_qp_system(n, geom, config_.curvature_weight, config_.reg_weight);
+  const QPMatrix qp = assemble_qp_system(n, geom, config_.curvature_weight, config_.reg_weight,
+                                         config_.jerk_damping_weight);
 
   const std::vector<float> alpha = solve_projected_gauss_seidel(
     n, qp, alpha_min, alpha_max, config_.max_iterations, config_.tolerance_mm);

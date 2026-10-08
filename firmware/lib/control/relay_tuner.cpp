@@ -8,8 +8,8 @@
 namespace lf {
 
 RelayTuner::RelayTuner(float relay_amplitude, float hysteresis_mm)
-  : relay_amp_((relay_amplitude > 0.01f) ? relay_amplitude : 0.12f),
-    hysteresis_mm_((hysteresis_mm > 0.1f) ? hysteresis_mm : 1.0f) {
+  : relay_amp_((relay_amplitude > 0.01f) ? relay_amplitude : 0.35f),
+    hysteresis_mm_((hysteresis_mm > 0.1f) ? hysteresis_mm : 3.5f) {
   reset();
 }
 

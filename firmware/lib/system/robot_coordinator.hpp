@@ -8,6 +8,7 @@
 #include "control/trajectory_follower.hpp"
 #include "math/centroid.hpp"
 #include "math/odometry.hpp"
+#include "strategy/tactical_arbiter.hpp"
 #include "track/trajectory_planner.hpp"
 
 namespace lf {
@@ -40,6 +41,7 @@ public:
     return racing_trajectory_;
   }
   void set_racing_trajectory(const std::vector<TrajectoryPoint>& traj);
+  bool reoptimize_racing_trajectory();
 
   [[nodiscard]] const std::vector<ObstacleGeometry>& get_detected_obstacles() const {
     return detected_obstacles_;
@@ -57,7 +59,12 @@ public:
   void set_obstacle_parameters(float front_detect_dist_m, float clearance_m, float length_m);
   void get_obstacle_parameters(float& front_detect_dist_m, float& clearance_m,
                                float& length_m) const;
+  void set_optimizer_params(float max_lat_dev_mm, float jerk_weight);
+  void get_optimizer_params(float& max_lat_dev_mm, float& jerk_weight) const;
   void set_min_finish_arm_dist(float dist_m) { config_.tracking.min_finish_arm_dist_m = dist_m; }
+  void apply_motor_drive(float v_target, float steer, MotorCmd& out) const;
+
+  [[nodiscard]] const TacticalBehaviorArbiter& get_arbiter() const { return arbiter_; }
 
 private:
   static void handle_idle_mode(MotorCmd& out);
@@ -67,6 +74,7 @@ private:
   void handle_run_2_sprint_mode(const SensorData& in, float centroid_mm, bool line_found,
                                 bool is_finish, float dt, MotorCmd& out);
   bool check_finish_condition(bool is_finish, float total_dist, float dt, MotorCmd& out);
+  bool poll_finish_line_entry(bool is_finish, float total_dist, float dt);
 
   RobotConfig config_;
   RobotMode mode_ = RobotMode::kIdle;
@@ -75,6 +83,7 @@ private:
   CentroidCalculator centroid_calc_;
   OdometryTracker odometry_;
   RelayTuner tuner_;
+  TacticalBehaviorArbiter arbiter_;
   TrajectoryFollower follower_;
   TrajectoryPlanner planner_;
 

@@ -96,10 +96,11 @@ TrackingCommand StanleyTracker::update(const Pose2D& pose, float current_v_mps,
   float vl = target_v * (1.0f + delta);
   float vr = target_v * (1.0f - delta);
 
-  if (target_v > 0.0f) {
-    vl = std::max(0.0f, vl);
-    vr = std::max(0.0f, vr);
-  }
+  // Allow differential pivot turn (counter-rotation) when steering error is sharp,
+  // clamped to max motor capacity rather than artificial one-way zero floor.
+  constexpr float kMaxWheelSpeedMps = 2.50f;
+  vl = std::clamp(vl, -kMaxWheelSpeedMps, kMaxWheelSpeedMps);
+  vr = std::clamp(vr, -kMaxWheelSpeedMps, kMaxWheelSpeedMps);
 
   cmd.left_wheel_mps = vl;
   cmd.right_wheel_mps = vr;

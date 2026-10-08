@@ -34,18 +34,18 @@ struct Theme {
   static constexpr Color kArenaGrid = {225, 230, 238, 255};  // 200mm grid lines
 
   // Typography Hierarchy Tokens (px)
-  static constexpr float kFontTitle = 24.0f;
-  static constexpr float kFontMetric = 20.0f;
-  static constexpr float kFontLabel = 13.0f;
-  static constexpr float kFontButton = 12.0f;
-  static constexpr float kFontSmall = 11.0f;
+  static constexpr float kFontTitle = 26.0f;
+  static constexpr float kFontMetric = 22.0f;
+  static constexpr float kFontLabel = 15.0f;
+  static constexpr float kFontButton = 14.0f;
+  static constexpr float kFontSmall = 12.0f;
 
   // Layout Dimensions (Base unscaled dp)
-  static constexpr float kTopPillHeight = 42.0f;
-  static constexpr float kRibbonHeight = 46.0f;
-  static constexpr float kButtonPaddingX = 12.0f;
-  static constexpr float kCardPaddingX = 12.0f;
-  static constexpr float kCardGap = 8.0f;
+  static constexpr float kTopPillHeight = 46.0f;
+  static constexpr float kRibbonHeight = 52.0f;
+  static constexpr float kButtonPaddingX = 14.0f;
+  static constexpr float kCardPaddingX = 14.0f;
+  static constexpr float kCardGap = 10.0f;
 };
 
 // Backwards compatibility alias

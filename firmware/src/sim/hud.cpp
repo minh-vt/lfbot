@@ -109,7 +109,7 @@ void draw_top_control_pill(float screen_w, float ui_scale, const lf::RobotCoordi
                            const SimRobotState& state, const char* track_name,
                            const Font& font_bold, const Font& font_mono, GuiAction& out_act) {
   const float pill_h = Theme::kTopPillHeight * ui_scale;
-  const float max_pill_w = 1360.0f * ui_scale;
+  const float max_pill_w = 1800.0f * ui_scale;
   const float pill_w = std::min(screen_w - 32.0f * ui_scale, max_pill_w);
   const float pill_x = (screen_w - pill_w) * 0.5f;
   const float pill_y = 12.0f * ui_scale;
@@ -199,8 +199,14 @@ void draw_top_control_pill(float screen_w, float ui_scale, const lf::RobotCoordi
 
   // 4. Quick Actions on the Right (Rendered dynamically using ButtonSpec array)
   float right_x = pill_x + pill_w - 8.0f * ui_scale;
-  const std::array<ButtonSpec, 6> right_buttons = {
+  const std::array<ButtonSpec, 8> right_buttons = {
     {
+      {
+        state.is_tuning_drawer_open ? "[P] PARAMS *" : "[P] PARAMS",
+        GuiAction::kToggleTuningDrawer,
+        state.is_tuning_drawer_open ? Theme::kSuccess : Theme::kTextDim,
+        state.is_tuning_drawer_open,
+      },
       {
         state.is_setup_mode ? "[E] EDITING" : "[E] SETUP",
         GuiAction::kToggleSetupMode,
@@ -217,6 +223,7 @@ void draw_top_control_pill(float screen_w, float ui_scale, const lf::RobotCoordi
       },
       {"[2] SPRINT", GuiAction::kRun2Sprint, Theme::kWarn, mode == lf::RobotMode::kRun2Sprint},
       {"[1] MAP", GuiAction::kRun1Map, Theme::kAccent, mode == lf::RobotMode::kRun1Map},
+      {"[T] TUNE", GuiAction::kAutoTune, Theme::kSuccess, mode == lf::RobotMode::kAutoTune},
     },
   };
 
@@ -288,7 +295,7 @@ void draw_bottom_telemetry_ribbon(float screen_w, float screen_h, float ui_scale
                                   const SimRobotState& state, const Font& font_bold,
                                   const Font& font_mono) {
   const float rib_h = Theme::kRibbonHeight * ui_scale;
-  const float max_rib_w = 1360.0f * ui_scale;
+  const float max_rib_w = 1800.0f * ui_scale;
   const float rib_w = std::min(screen_w - 32.0f * ui_scale, max_rib_w);
   const float rib_x = (screen_w - rib_w) * 0.5f;
   const float rib_y = screen_h - rib_h - 12.0f * ui_scale;
@@ -420,6 +427,119 @@ void draw_floating_toast(float screen_w, float ui_scale, bool is_setup_mode, con
                   font_sz, Theme::kTextMain);
 }
 
+void draw_tuning_drawer(float screen_w, float ui_scale, const lf::RobotCoordinator& robot,
+                        const SimRobotState& state, const Font& font_bold, const Font& font_mono,
+                        GuiAction& out_act) {
+  if (!state.is_tuning_drawer_open) {
+    return;
+  }
+
+  const float drawer_w = 420.0f * ui_scale;
+  const float drawer_h = 390.0f * ui_scale;
+  const float drawer_x = screen_w - drawer_w - 16.0f * ui_scale;
+  const float drawer_y = 66.0f * ui_scale;
+  const Rectangle drawer_rect{drawer_x, drawer_y, drawer_w, drawer_h};
+
+  DrawRectangleRounded(drawer_rect, 0.08f, 6, ColorAlpha(Theme::kSurface, 0.96f));
+  DrawRectangleRoundedLines(drawer_rect, 0.08f, 6, Theme::kBorderActive);
+
+  // Title
+  const float font_title_sz = Theme::kFontLabel * ui_scale;
+  draw_text_crisp(font_bold, "TUNING & LIVE RE-OPT [P]", drawer_x + 14.0f * ui_scale,
+                  drawer_y + 12.0f * ui_scale, font_title_sz, Theme::kAccent);
+
+  // Close button
+  const float close_btn_w = 26.0f * ui_scale;
+  const float close_btn_h = 24.0f * ui_scale;
+  const Rectangle close_rect{
+    drawer_x + drawer_w - close_btn_w - 12.0f * ui_scale,
+    drawer_y + 10.0f * ui_scale,
+    close_btn_w,
+    close_btn_h,
+  };
+  draw_compact_btn(close_rect, "X", Theme::kTextDim, false, font_bold, font_title_sz,
+                   GuiAction::kToggleTuningDrawer, out_act);
+
+  draw_hairline_divider(drawer_x + 10.0f * ui_scale, drawer_y + 40.0f * ui_scale,
+                        drawer_w - 20.0f * ui_scale);
+
+  float row_y = drawer_y + 48.0f * ui_scale;
+  const float row_h = 30.0f * ui_scale;
+  const float font_row_sz = Theme::kFontButton * ui_scale;
+  const float step_btn_w = 30.0f * ui_scale;
+  const float step_btn_h = 22.0f * ui_scale;
+
+  const auto draw_param_row = [&](const char* name, const char* val_str, GuiAction act_down,
+                                  GuiAction act_up) {
+    draw_text_crisp(font_bold, name, drawer_x + 14.0f * ui_scale, row_y + 4.0f * ui_scale,
+                    font_row_sz, Theme::kTextMuted);
+    draw_text_crisp(font_mono, val_str, drawer_x + 175.0f * ui_scale, row_y + 4.0f * ui_scale,
+                    font_row_sz, Theme::kTextMain);
+
+    const float btn_y = row_y + 1.0f * ui_scale;
+    const float minus_x = drawer_x + drawer_w - 2.0f * step_btn_w - 22.0f * ui_scale;
+    const float plus_x = drawer_x + drawer_w - step_btn_w - 14.0f * ui_scale;
+
+    draw_compact_btn(Rectangle{minus_x, btn_y, step_btn_w, step_btn_h}, "-", Theme::kTextDim, false,
+                     font_bold, font_row_sz, act_down, out_act);
+    draw_compact_btn(Rectangle{plus_x, btn_y, step_btn_w, step_btn_h}, "+", Theme::kTextDim, false,
+                     font_bold, font_row_sz, act_up, out_act);
+
+    row_y += row_h;
+  };
+
+  float kp = 0.0f;
+  float ki = 0.0f;
+  float kd = 0.0f;
+  robot.get_line_pid_gains(kp, ki, kd);
+
+  const float v_map = robot.get_config().profiler.safe_map_speed_mps;
+  const float v_sprint = robot.get_config().profiler.max_straight_speed_mps;
+  const float accel = robot.get_config().profiler.max_accel_mps2;
+  float obs_dist = 0.0f;
+  float obs_clear = 0.0f;
+  float obs_len = 0.0f;
+  robot.get_obstacle_parameters(obs_dist, obs_clear, obs_len);
+
+  float max_dev_mm = 0.0f;
+  float jerk_weight = 0.0f;
+  robot.get_optimizer_params(max_dev_mm, jerk_weight);
+
+  std::array<char, 32> buf{};
+  (void)snprintf(buf.data(), buf.size(), "%.4f", kp);
+  draw_param_row("Line Kp", buf.data(), GuiAction::kTuneKpDown, GuiAction::kTuneKpUp);
+
+  (void)snprintf(buf.data(), buf.size(), "%.4f", kd);
+  draw_param_row("Line Kd", buf.data(), GuiAction::kTuneKdDown, GuiAction::kTuneKdUp);
+
+  (void)snprintf(buf.data(), buf.size(), "%.2f m/s", v_map);
+  draw_param_row("Map V", buf.data(), GuiAction::kTuneVmapDown, GuiAction::kTuneVmapUp);
+
+  (void)snprintf(buf.data(), buf.size(), "%.2f m/s", v_sprint);
+  draw_param_row("Sprint V", buf.data(), GuiAction::kTuneVsprintDown, GuiAction::kTuneVsprintUp);
+
+  (void)snprintf(buf.data(), buf.size(), "%.1f m/s²", accel);
+  draw_param_row("Accel a", buf.data(), GuiAction::kTuneAccelDown, GuiAction::kTuneAccelUp);
+
+  (void)snprintf(buf.data(), buf.size(), "%.2f m", obs_clear);
+  draw_param_row("Obs Clear", buf.data(), GuiAction::kTuneObsClearDown, GuiAction::kTuneObsClearUp);
+
+  (void)snprintf(buf.data(), buf.size(), "%.3f", jerk_weight);
+  draw_param_row("Jerk Damp", buf.data(), GuiAction::kTuneJerkDown, GuiAction::kTuneJerkUp);
+
+  (void)snprintf(buf.data(), buf.size(), "%.0f mm", max_dev_mm);
+  draw_param_row("Max Dev", buf.data(), GuiAction::kTuneCorridorDown, GuiAction::kTuneCorridorUp);
+
+  row_y += 12.0f * ui_scale;
+
+  // Prominent Live Re-optimize Button
+  const float reopt_btn_w = drawer_w - 28.0f * ui_scale;
+  const float reopt_btn_h = 32.0f * ui_scale;
+  draw_compact_btn(Rectangle{drawer_x + 14.0f * ui_scale, row_y, reopt_btn_w, reopt_btn_h},
+                   "RE-OPTIMIZE TRAJECTORY", Theme::kAccent, false, font_bold, font_row_sz,
+                   GuiAction::kTriggerLiveReopt, out_act);
+}
+
 }  // namespace
 
 void draw_text_crisp(const Font& font, const char* text, float x, float y, float font_size,
@@ -456,7 +576,12 @@ HudResult draw_tactical_hud(float screen_w, float screen_h, float ui_scale,
   draw_bottom_telemetry_ribbon(screen_w, screen_h, ui_scale, robot, in, state, font_bold,
                                font_mono);
 
-  // 4. Floating Toast Notification
+  // 4. Interactive parameter tuning drawer (when toggled open)
+  if (state.is_tuning_drawer_open) {
+    draw_tuning_drawer(screen_w, ui_scale, robot, state, font_bold, font_mono, result.action);
+  }
+
+  // 5. Floating Toast Notification
   if (toast_timer > 0.0f && toast_msg != nullptr && toast_msg[0] != '\0') {
     draw_floating_toast(screen_w, ui_scale, state.is_setup_mode, toast_msg, font_bold);
   }
