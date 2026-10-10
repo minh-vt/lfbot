@@ -1,10 +1,9 @@
 #include <algorithm>
-#include <cstdint>
 
 #include "kernel/plan.hpp"
 #include "kernel/step.hpp"
 #include "race_arbiter.hpp"
-#include "raylib.h"
+#include <raylib.h>
 #include "renderer.hpp"
 #include "track_asset.hpp"
 #include "world_physics.hpp"
@@ -12,8 +11,6 @@
 namespace {
 
 constexpr const char* kManifestPath = "assets/track_vongloai.json";
-
-enum class RunMode : std::uint8_t { kIdle = 0, kRun1 = 1, kRun2 = 2, kDone = 3 };
 
 }  // namespace
 
@@ -38,7 +35,7 @@ int main() {
   sim::Renderer renderer;
   renderer.init(track.manifest());
 
-  RunMode mode = RunMode::kIdle;
+  kernel::RunMode mode = kernel::RunMode::kIdle;
   float run_elapsed = 0.0f;
   float run1_time = 0.0f;
   float run2_time = 0.0f;
@@ -50,23 +47,23 @@ int main() {
       world.reset(track.manifest());
       arbiter.reset(track.manifest());
       state = {};
-      plan = {};
-      mode = RunMode::kIdle;
+      plan.reset();
+      mode = kernel::RunMode::kIdle;
       run_elapsed = 0.0f;
       run1_time = 0.0f;
       run2_time = 0.0f;
     }
-    if (IsKeyPressed(KEY_SPACE) && mode == RunMode::kIdle) {
-      mode = RunMode::kRun1;
+    if (IsKeyPressed(KEY_SPACE) && mode == kernel::RunMode::kIdle) {
+      mode = kernel::RunMode::kRun1;
     }
     if (IsKeyPressed(KEY_ONE)) {
-      mode = RunMode::kRun1;
+      mode = kernel::RunMode::kRun1;
     }
     if (IsKeyPressed(KEY_TWO)) {
-      mode = RunMode::kRun2;
+      mode = kernel::RunMode::kRun2;
     }
 
-    if (mode == RunMode::kRun1 || mode == RunMode::kRun2) {
+    if (mode == kernel::RunMode::kRun1 || mode == kernel::RunMode::kRun2) {
       run_elapsed += dt;
 
       kernel::SensorFrame frame;
@@ -74,7 +71,7 @@ int main() {
       const auto result = kernel::step(state, frame, plan, cfg);
       state = result.state;
 
-      if (mode == RunMode::kRun1) {
+      if (mode == kernel::RunMode::kRun1) {
         const float tick =
           0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
         kernel::record(plan, tick, result.path_steer, frame.obstacle_side);
@@ -83,17 +80,17 @@ int main() {
       world.step(result.command, dt);
       arbiter.observe(world.x(), world.y(), world.v(), frame.line_detected, dt);
 
-      if (mode == RunMode::kRun1 && state.finish_latched) {
+      if (mode == kernel::RunMode::kRun1 && state.finish_latched) {
         run1_time = run_elapsed;
         kernel::bake(plan, cfg);
         world.reset(track.manifest());
         arbiter.reset(track.manifest());
         state = {};
         run_elapsed = 0.0f;
-        mode = RunMode::kRun2;
-      } else if (mode == RunMode::kRun2 && state.finish_latched) {
+        mode = kernel::RunMode::kRun2;
+      } else if (mode == kernel::RunMode::kRun2 && state.finish_latched) {
         run2_time = run_elapsed;
-        mode = RunMode::kDone;
+        mode = kernel::RunMode::kDone;
       }
     }
 

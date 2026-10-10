@@ -3,20 +3,18 @@
 #include <algorithm>
 #include <cmath>
 
-#include "kernel/plan.hpp"
-
 namespace lf::kernel {
 namespace {
 
-// Né vật cản: Run 1 phản ứng (ToF); Run 2 feedforward (plan) + ToF safety trim.
+// Né vật cản: Run 1 phản ứng (ToF); Run 2 feedforward (plan đã bake) + ToF safety trim.
 float steer_evasion(const SensorFrame& frame, const TrackPlan& plan, float tick,
                     const TuneConfig& cfg) {
   const float reactive = evasion_bias(frame, cfg);
-  if (plan.obstacle_side.empty()) {
+  if (!plan.baked) {
     return reactive;
   }
   constexpr float kSafetyTrim = 0.25f;
-  return -lookup(plan.obstacle_side, tick) * cfg.evasion_bias + kSafetyTrim * reactive;
+  return -plan.obstacle_at(tick) * cfg.evasion_bias + kSafetyTrim * reactive;
 }
 
 }  // namespace
@@ -45,12 +43,12 @@ float evasion_bias(const SensorFrame& frame, const TuneConfig& cfg) {
 float throttle_profile(float tick, float steer, const SensorFrame& frame, const TrackPlan& plan,
                        const TuneConfig& cfg) {
   float throttle = 0.0f;
-  if (plan.throttle_max.empty()) {
+  if (plan.baked) {
+    // Run 2 phát lại: profile đã bake.
+    throttle = cfg.sprint_scale * plan.throttle_at(tick);
+  } else {
     // Run 1 phản ứng: giảm ga theo độ gắt lái hiện tại.
     throttle = cfg.base_throttle * (1.0f - cfg.corner_slowdown * std::abs(steer));
-  } else {
-    // Run 2 phát lại: profile đã bake.
-    throttle = cfg.sprint_scale * lookup(plan.throttle_max, tick);
   }
   throttle *= (1.0f - cfg.evasion_slowdown * frame.obstacle_danger);
   return std::clamp(throttle, 0.0f, 1.0f);
@@ -85,7 +83,8 @@ StepResult step(const KernelState& state, const SensorFrame& frame, const TrackP
     next.last_direction = (frame.line_error >= 0.0f) ? 1.0f : -1.0f;
   }
 
-  const float steer_ff = lookup(plan.steer_ff, tick);
+  // Feedforward CHỈ khi plan đã bake (Run 2); Run 1 thuần phản ứng (tránh self-feedforward).
+  const float steer_ff = plan.baked ? plan.steer_at(tick) : 0.0f;
   const float steer_fb = steer_pd(error, frame.dt, next, cfg);
   const float path_steer = steer_ff + steer_fb;
   const float steer = std::clamp(path_steer + steer_evasion(frame, plan, tick, cfg), -1.0f, 1.0f);

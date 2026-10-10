@@ -1,9 +1,13 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
-#include <vector>
 
 namespace lf::kernel {
+
+// Chế độ nhiệm vụ (dùng chung sim + esp32).
+enum class RunMode : std::uint8_t { kIdle = 0, kRun1 = 1, kRun2 = 2, kDone = 3 };
 
 // Đầu vào không-thứ-nguyên mỗi tick.
 struct SensorFrame {
@@ -32,11 +36,25 @@ struct KernelState {
   bool finish_latched = false;
 };
 
-// Cầu nối 1-D Run1 → Run2 (lớn, const-ref vào step).
+// Dung lượng tối đa của plan: 4096 tick × 20mm = 81.9m (thừa cho sa bàn ≤ 41m).
+inline constexpr std::size_t kMaxPlanTicks = 4096;
+
+// Cầu nối 1-D Run1 → Run2. Fixed-capacity: không cấp phát động trong vòng 500Hz.
 struct TrackPlan {
-  std::vector<float> steer_ff;       // ghi Run 1 (steering theo vạch, không né)
-  std::vector<float> obstacle_side;  // ghi Run 1 (±1), làm mượt khi bake
-  std::vector<float> throttle_max;   // bake sau Run 1 (backward-pass)
+  std::array<float, kMaxPlanTicks> steer_ff{};       // ghi Run 1 (steering theo vạch, không né)
+  std::array<float, kMaxPlanTicks> obstacle_side{};  // ghi Run 1 (±1), giãn khi bake
+  std::array<float, kMaxPlanTicks> throttle_max{};   // bake sau Run 1 (backward-pass)
+  std::size_t length = 0;
+  bool baked = false;  // true sau bake() → step dùng feedforward (Run 2)
+
+  void reset() {
+    length = 0;
+    baked = false;
+  }
+  [[nodiscard]] bool empty() const { return length == 0; }
+  [[nodiscard]] float steer_at(float tick) const;
+  [[nodiscard]] float obstacle_at(float tick) const;
+  [[nodiscard]] float throttle_at(float tick) const;
 };
 
 // Thuần gain, không đơn vị.
@@ -50,7 +68,7 @@ struct TuneConfig {
   float evasion_slowdown = 0.7f;  // giảm ga khi danger
   float sprint_scale = 1.2f;
   float decel_per_tick = 0.02f;       // giảm ga tối đa mỗi tick (backward-pass)
-  std::int32_t obstacle_window = 20;  // cửa sổ làm mượt obstacle_side (tick)
+  std::int32_t obstacle_window = 20;  // cửa sổ giãn obstacle_side (tick)
 };
 
 }  // namespace lf::kernel
