@@ -11,6 +11,8 @@
 *.elf
 *.hex
 test_runner
+# espidf
+sdkconfig.*
 
 # Editor and IDE
 .vscode/
@@ -32,3 +34,6 @@ __pycache__/
 
 # Test outputs
 .sim_crash_test.json
+
+# Python venv (uv)
+.venv/
