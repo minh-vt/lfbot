@@ -8,10 +8,10 @@ Tài liệu định nghĩa ngữ cảnh, quy tắc kiến trúc và hợp đồn
 Robot tự hành dò line tốc độ cao và vượt chướng ngại vật thi đấu "F-Maze-Solving" (Đại học FPT).
 Mã nguồn được phân tách theo mô hình kiến trúc sâu (Deep Modules) với ranh giới phân tầng nghiêm ngặt:
 - **`firmware/lib/`**: Lõi giải thuật C++17 độc lập hoàn toàn với phần cứng và hệ điều hành (không phụ thuộc Arduino, FreeRTOS hay Raylib).
-- **`firmware/src/sim/`**: Môi trường mô phỏng máy tính để bàn (Raylib 2D SSoT), nhận diện vạch quang học và Raycast laser ToF trên sa bàn 2400x1600 mm.
+- **`firmware/src/sim/`**: Môi trường mô phỏng máy tính để bàn (Raylib 2D), nhận diện vạch quang học (8 cảm biến IR) và ToF trên sa bàn 6000×1500 mm (vòng loại) / 10000×1500 mm (chung kết), 1 px = 1 mm.
 - **`firmware/src/esp32/`**: Firmware nhúng chạy trên vi điều khiển ESP32-S3 FreeRTOS (dual-core 240MHz, ADC-DMA, PCNT, MCPWM).
 - **`firmware/test/`**: Bộ kiểm thử tự động không đồ họa (Headless Native Tests).
-- **`docs/`**: Nguồn chân lý duy nhất (SSoT) về thuật ngữ nghiệp vụ ([CONTEXT.md](file:///home/minhvt/Projects/lfbot/docs/CONTEXT.md)) và đặc tả kỹ thuật ([SPEC.md](file:///home/minhvt/Projects/lfbot/docs/SPEC.md)).
+- **`.scratch/architecture-redesign/spec.md`**: Spec kiến trúc duy nhất (SSoT) — kernel không-thứ-nguyên + adapters (sim, esp32). Ticket triển khai tại `.scratch/architecture-redesign/issues/`.
 
 ---
 

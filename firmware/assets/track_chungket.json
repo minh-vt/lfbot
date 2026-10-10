@@ -1,0 +1,34 @@
+{
+  "name": "Chung Kết 2026 (Lane A)",
+  "image": "assets/track_chungket.png",
+  "arena_width": 10000.0,
+  "arena_height": 1500.0,
+  "start_pose": {
+    "x": 1024.0,
+    "y": 298.5,
+    "theta_deg": 0.0
+  },
+  "finish_box": {
+    "min_x": 8852.0,
+    "max_x": 9012.0,
+    "min_y": 1231.5,
+    "max_y": 1391.5
+  },
+  "min_finish_arm_dist_m": 29.5,
+  "obstacles": [
+    {
+      "x": 3054.3,
+      "y": 784.1,
+      "width": 105.0,
+      "height": 60.0,
+      "angle_deg": 0.0
+    },
+    {
+      "x": 8541.5,
+      "y": 784.1,
+      "width": 105.0,
+      "height": 60.0,
+      "angle_deg": 0.0
+    }
+  ]
+}

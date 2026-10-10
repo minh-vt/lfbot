@@ -3,32 +3,23 @@ min_quality = 0.70
 min_acyclicity = 0.99
 max_cycles = 0
 
+# Layer order: số nhỏ = tầng trên (được phép phụ thuộc tầng dưới).
 [[layers]]
 name = "sim"
 order = 1
 paths = ["firmware/src/sim/**"]
 
 [[layers]]
-name = "system"
+name = "esp32"
+order = 1
+paths = ["firmware/src/esp32/**"]
+
+[[layers]]
+name = "kernel"
 order = 2
-paths = ["firmware/lib/system/**"]
+paths = ["firmware/lib/kernel/**"]
 
 [[layers]]
-name = "control"
+name = "layout"
 order = 3
-paths = ["firmware/lib/control/**"]
-
-[[layers]]
-name = "track"
-order = 4
-paths = ["firmware/lib/track/**"]
-
-[[layers]]
-name = "math"
-order = 5
-paths = ["firmware/lib/math/**"]
-
-[[layers]]
-name = "config"
-order = 6
-paths = ["firmware/lib/config/**"]
+paths = ["firmware/lib/layout/**"]

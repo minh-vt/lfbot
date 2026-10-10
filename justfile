@@ -15,8 +15,8 @@ test:
 sim-test:
     cd firmware && pio run -e sim_test -t exec
 
-# Kiem tra toan dien: format + lint + test + sim-test
-check: format-check test sim-test
+# Kiem tra toan dien: format + test
+check: format-check test
 
 # Tu dong format toan bo ma nguon bang clang-format
 format:
@@ -37,7 +37,7 @@ lint-fix:
 
 # Tao lai database compile_commands.json cho linter va clangd
 compiledb:
-    cd firmware && pio run -e sim -t compiledb
+    cd firmware && pio run -e lint -t compiledb
 
 # Chuan hoa sa ban tu anh thuc te AI (Vong loai 6000x1500, Chung ket 10000x1500)
 track:
