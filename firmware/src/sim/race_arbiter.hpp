@@ -36,4 +36,4 @@ private:
   Infraction infraction_ = Infraction::kNone;
 };
 
-}  // namespace lf::sim
+}

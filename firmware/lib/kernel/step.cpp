@@ -14,10 +14,10 @@ float steer_evasion(const SensorFrame& frame, const TrackPlan& plan, float tick,
     return reactive;
   }
   constexpr float kSafetyTrim = 0.25f;
-  return -plan.obstacle_at(tick) * cfg.evasion_bias + kSafetyTrim * reactive;
+  return -plan.obstacle_at(tick) * cfg.robot.evasion_bias + kSafetyTrim * reactive;
 }
 
-}  // namespace
+}
 
 float resolve_line_error(const SensorFrame& frame, const KernelState& state) {
   if (frame.line_detected) {
@@ -30,27 +30,24 @@ float steer_pd(float error, float dt, KernelState& state, const TuneConfig& cfg)
   const float safe_dt = std::max(dt, 1e-4f);
   const float derivative = (error - state.prev_error) / safe_dt;
   state.prev_error = error;
-  state.filtered_derivative =
-    cfg.d_filter_alpha * derivative + (1.0f - cfg.d_filter_alpha) * state.filtered_derivative;
-  return std::clamp(cfg.steer_kp * error + cfg.steer_kd * state.filtered_derivative, -1.0f, 1.0f);
+  state.filtered_derivative = cfg.robot.d_filter_alpha * derivative +
+                              (1.0f - cfg.robot.d_filter_alpha) * state.filtered_derivative;
+  return std::clamp(cfg.robot.steer_kp * error + cfg.robot.steer_kd * state.filtered_derivative,
+                    -1.0f, 1.0f);
 }
 
 float evasion_bias(const SensorFrame& frame, const TuneConfig& cfg) {
   // obstacle_side < 0 = vật cản bên trái → rẽ phải (+); ngược lại rẽ trái (−).
-  return -frame.obstacle_side * cfg.evasion_bias * frame.obstacle_danger;
+  return -frame.obstacle_side * cfg.robot.evasion_bias * frame.obstacle_danger;
 }
 
 float throttle_profile(float tick, float steer, const SensorFrame& frame, const TrackPlan& plan,
                        const TuneConfig& cfg) {
-  float throttle = 0.0f;
-  if (plan.baked) {
-    // Run 2 phát lại: profile đã bake.
-    throttle = cfg.sprint_scale * plan.throttle_at(tick);
-  } else {
-    // Run 1 phản ứng: giảm ga theo độ gắt lái hiện tại.
-    throttle = cfg.base_throttle * (1.0f - cfg.corner_slowdown * std::abs(steer));
-  }
-  throttle *= (1.0f - cfg.evasion_slowdown * frame.obstacle_danger);
+  // Run 2 phát lại profile đã bake; Run 1 giảm ga theo độ gắt lái hiện tại.
+  const float base =
+    plan.baked ? cfg.track.sprint_scale * plan.throttle_at(tick)
+               : cfg.track.base_throttle * (1.0f - cfg.robot.corner_slowdown * std::abs(steer));
+  const float throttle = base * (1.0f - cfg.robot.evasion_slowdown * frame.obstacle_danger);
   return std::clamp(throttle, 0.0f, 1.0f);
 }
 
@@ -68,7 +65,7 @@ MotorCommand mix_differential(float throttle, float steer, bool brake) {
     left /= peak;
     right /= peak;
   }
-  return {std::clamp(left, -1.0f, 1.0f), std::clamp(right, -1.0f, 1.0f), false};
+  return {left, right, false};
 }
 
 StepResult step(const KernelState& state, const SensorFrame& frame, const TrackPlan& plan,
@@ -95,4 +92,4 @@ StepResult step(const KernelState& state, const SensorFrame& frame, const TrackP
   return {command, next, path_steer};
 }
 
-}  // namespace lf::kernel
+}

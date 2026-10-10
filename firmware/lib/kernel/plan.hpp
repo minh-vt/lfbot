@@ -10,4 +10,4 @@ void record(TrackPlan& plan, float tick, float steer, float obstacle_side);
 // Sau Run 1: giãn obstacle_side + backward-pass tick-space → throttle_max; đặt baked = true.
 void bake(TrackPlan& plan, const TuneConfig& cfg);
 
-}  // namespace lf::kernel
+}

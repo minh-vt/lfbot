@@ -3,14 +3,11 @@
 #include <algorithm>
 #include <cmath>
 
+#include "kernel/normalize.hpp"
 #include "layout/sensor_layout.hpp"
 
 namespace lf::sim {
 namespace {
-
-float deg2rad(float degrees) {
-  return degrees * kPi / 180.0f;
-}
 
 // Cắt tia vào 1 khe trục (slab). Trả false nếu trượt.
 bool clip_slab(float origin, float dir, float lo, float hi, float& t_enter, float& t_exit) {
@@ -41,13 +38,13 @@ float ray_aabb(float ox, float oy, float dx, float dy, float min_x, float min_y,
   return (t_enter >= 0.0f) ? t_enter : range;
 }
 
-}  // namespace
+}
 
 void WorldPhysics::reset(const TrackManifest& manifest) {
   manifest_ = manifest;
   x_ = manifest.start_x_mm;
   y_ = manifest.start_y_mm;
-  theta_ = deg2rad(manifest.start_theta_deg);
+  theta_ = manifest.start_theta_deg * kPi / 180.0f;
   v_ = 0.0f;
   w_ = 0.0f;
   wheel_ticks_l_ = 0.0f;
@@ -70,12 +67,13 @@ float WorldPhysics::ray_tof(float ox, float oy, float base_theta, float offset) 
   const float angle = base_theta + offset;
   const float dx = std::cos(angle);
   const float dy = std::sin(angle);
-  float best = kTofRangeMm;
+  float best = layout::kTofRangeMm;
   for (const auto& obstacle : manifest_.obstacles) {
     const float half_w = obstacle.width_mm * 0.5f;
     const float half_h = obstacle.height_mm * 0.5f;
-    const float distance = ray_aabb(ox, oy, dx, dy, obstacle.x_mm - half_w, obstacle.y_mm - half_h,
-                                    obstacle.x_mm + half_w, obstacle.y_mm + half_h, kTofRangeMm);
+    const float distance =
+      ray_aabb(ox, oy, dx, dy, obstacle.x_mm - half_w, obstacle.y_mm - half_h,
+               obstacle.x_mm + half_w, obstacle.y_mm + half_h, layout::kTofRangeMm);
     best = std::min(best, distance);
   }
   return best;
@@ -114,24 +112,11 @@ void WorldPhysics::sample(lf::kernel::SensorFrame& frame, float dt, const TrackA
   const float distance_front = ray_tof(front_x, front_y, theta_, 0.0f);
   const float distance_left = ray_tof(front_x, front_y, theta_, -0.4f);
   const float distance_right = ray_tof(front_x, front_y, theta_, 0.4f);
-  const float distance_min = std::min({distance_front, distance_left, distance_right});
-  frame.obstacle_danger =
-    (distance_min < kTofRangeMm) ? std::clamp(1.0f - distance_min / kTofRangeMm, 0.0f, 1.0f) : 0.0f;
-  if (frame.obstacle_danger > 0.0f) {
-    if (distance_left < distance_right) {
-      frame.obstacle_side = -1.0f;
-    } else if (distance_right < distance_left) {
-      frame.obstacle_side = 1.0f;
-    } else {
-      frame.obstacle_side = 0.0f;
-    }
-  } else {
-    frame.obstacle_side = 0.0f;
-  }
+  kernel::normalize_tof(frame, layout::kTofRangeMm, distance_front, distance_left, distance_right);
 
   // Finish: tâm robot vào ô đích.
   frame.finish_detected = (x_ >= manifest_.finish_min_x && x_ <= manifest_.finish_max_x &&
                            y_ >= manifest_.finish_min_y && y_ <= manifest_.finish_max_y);
 }
 
-}  // namespace lf::sim
+}

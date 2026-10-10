@@ -1,6 +1,7 @@
 #pragma once
 
 #include <raylib.h>
+
 #include "sim_config.hpp"
 
 namespace lf::sim {
@@ -22,4 +23,4 @@ private:
   float scale_ = 1.0f;
 };
 
-}  // namespace lf::sim
+}

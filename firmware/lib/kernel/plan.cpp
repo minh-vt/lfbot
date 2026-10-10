@@ -25,7 +25,7 @@ float interp(const float* values, std::size_t length, float tick) {
 
 // Giãn obstacle_side về phía tick nhỏ hơn (né sớm), in-place, không bộ nhớ tạm.
 void dilate_obstacle_side(TrackPlan& plan, const TuneConfig& cfg) {
-  const int span = 2 * std::max(1, static_cast<int>(cfg.obstacle_window));
+  const int span = 2 * std::max(1, static_cast<int>(cfg.track.obstacle_window));
   float side = 0.0f;
   int hold = 0;
   for (std::size_t i = plan.length; i > 0; --i) {
@@ -47,14 +47,14 @@ void bake_throttle(TrackPlan& plan, const TuneConfig& cfg) {
   float next = 1.0f;
   for (std::size_t i = plan.length; i > 0; --i) {
     const std::size_t index = i - 1;
-    const float grip = 1.0f - cfg.corner_slowdown * std::abs(plan.steer_ff[index]);
-    const float capped = std::min(grip, next + cfg.decel_per_tick);
+    const float grip = 1.0f - cfg.robot.corner_slowdown * std::abs(plan.steer_ff[index]);
+    const float capped = std::min(grip, next + cfg.track.decel_per_tick);
     plan.throttle_max[index] = std::max(0.0f, capped);
     next = plan.throttle_max[index];
   }
 }
 
-}  // namespace
+}
 
 float TrackPlan::steer_at(float tick) const {
   return interp(steer_ff.data(), length, tick);
@@ -97,4 +97,4 @@ void bake(TrackPlan& plan, const TuneConfig& cfg) {
   plan.baked = true;
 }
 
-}  // namespace lf::kernel
+}

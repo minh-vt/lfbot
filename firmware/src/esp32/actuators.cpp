@@ -24,6 +24,21 @@ struct Motor {
 Motor g_left;
 Motor g_right;
 
+// Gắn 1 kênh PWM (generator + comparator, đảo mức tại compare) vào operator.
+void attach_pwm_channel(mcpwm_oper_handle_t oper, int gpio,
+                        const mcpwm_comparator_config_t& cmp_cfg, mcpwm_cmpr_handle_t* cmp_out) {
+  mcpwm_generator_config_t gen_cfg = {};
+  gen_cfg.gen_gpio_num = gpio;
+  mcpwm_gen_handle_t gen = nullptr;
+  mcpwm_new_generator(oper, &gen_cfg, &gen);
+  mcpwm_new_comparator(oper, &cmp_cfg, cmp_out);
+  mcpwm_generator_set_action_on_timer_event(
+    gen, MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY,
+                                      MCPWM_GEN_ACTION_HIGH));
+  mcpwm_generator_set_action_on_compare_event(
+    gen, MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, *cmp_out, MCPWM_GEN_ACTION_LOW));
+}
+
 void init_motor(int gpio_pwm, int gpio_dir, Motor& motor) {
   mcpwm_timer_config_t timer_cfg = {};
   timer_cfg.group_id = kGroup;
@@ -41,30 +56,8 @@ void init_motor(int gpio_pwm, int gpio_dir, Motor& motor) {
 
   mcpwm_comparator_config_t cmp_cfg = {};
   cmp_cfg.flags.update_cmp_on_tez = true;
-
-  mcpwm_generator_config_t gen_cfg = {};
-
-  gen_cfg.gen_gpio_num = gpio_pwm;
-  mcpwm_gen_handle_t gen_pwm = nullptr;
-  mcpwm_new_generator(oper, &gen_cfg, &gen_pwm);
-  mcpwm_new_comparator(oper, &cmp_cfg, &motor.cmp_pwm);
-  mcpwm_generator_set_action_on_timer_event(
-    gen_pwm, MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY,
-                                          MCPWM_GEN_ACTION_HIGH));
-  mcpwm_generator_set_action_on_compare_event(
-    gen_pwm,
-    MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor.cmp_pwm, MCPWM_GEN_ACTION_LOW));
-
-  gen_cfg.gen_gpio_num = gpio_dir;
-  mcpwm_gen_handle_t gen_dir = nullptr;
-  mcpwm_new_generator(oper, &gen_cfg, &gen_dir);
-  mcpwm_new_comparator(oper, &cmp_cfg, &motor.cmp_dir);
-  mcpwm_generator_set_action_on_timer_event(
-    gen_dir, MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY,
-                                          MCPWM_GEN_ACTION_HIGH));
-  mcpwm_generator_set_action_on_compare_event(
-    gen_dir,
-    MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor.cmp_dir, MCPWM_GEN_ACTION_LOW));
+  attach_pwm_channel(oper, gpio_pwm, cmp_cfg, &motor.cmp_pwm);
+  attach_pwm_channel(oper, gpio_dir, cmp_cfg, &motor.cmp_dir);
 
   mcpwm_timer_enable(motor.timer);
   mcpwm_timer_start_stop(motor.timer, MCPWM_TIMER_START_NO_STOP);
@@ -83,7 +76,7 @@ void set_motor(const Motor& motor, float duty) {
   }
 }
 
-}  // namespace
+}
 
 void actuators_init() {
   init_motor(kLeftPwm, kLeftDir, g_left);
@@ -100,4 +93,4 @@ void actuators_write(const lf::kernel::MotorCommand& cmd) {
   set_motor(g_right, cmd.right_duty);
 }
 
-}  // namespace lf::esp32
+}

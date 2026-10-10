@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "kernel/normalize.hpp"
 #include "kernel/types.hpp"
 #include "layout/sensor_layout.hpp"
 
@@ -43,32 +44,8 @@ inline IrResult normalize_ir(const IrReadings& readings) {
   return result;
 }
 
-struct TofResult {
-  float danger = 0.0f;  // [0,1]
-  float side = 0.0f;    // [-1,1]: âm = vật cản trái
-};
-
-inline TofResult normalize_tof(float d_front_mm, float d_left_mm, float d_right_mm) {
-  constexpr float kRangeMm = 300.0f;
-  const float d_min = std::min({d_front_mm, d_left_mm, d_right_mm});
-  TofResult result;
-  result.danger = (d_min < kRangeMm) ? std::clamp(1.0f - d_min / kRangeMm, 0.0f, 1.0f) : 0.0f;
-  if (result.danger > 0.0f) {
-    if (d_left_mm < d_right_mm) {
-      result.side = -1.0f;
-    } else if (d_right_mm < d_left_mm) {
-      result.side = 1.0f;
-    } else {
-      result.side = 0.0f;
-    }
-  } else {
-    result.side = 0.0f;
-  }
-  return result;
-}
-
 // Giao diện phần cứng (định nghĩa trong sensors.cpp; chỉ build trên ESP32).
 void sensors_init();
 void sensors_read(lf::kernel::SensorFrame& frame, float dt);
 
-}  // namespace lf::esp32
+}

@@ -11,13 +11,13 @@ enum class RunMode : std::uint8_t { kIdle = 0, kRun1 = 1, kRun2 = 2, kDone = 3 }
 
 // Đầu vào không-thứ-nguyên mỗi tick.
 struct SensorFrame {
-  float line_error = 0.0f;       // [-1, 1]: lệch vạch chuẩn hóa (dương = vạch bên phải)
-  bool line_detected = false;    // có thấy vạch không
+  float line_error = 0.0f;  // [-1, 1]: lệch vạch chuẩn hóa (dương = vạch bên phải)
+  bool line_detected = false;
   bool finish_detected = false;  // cảm biến vạch đích
   float obstacle_danger = 0.0f;  // [0, 1]
   float obstacle_side = 0.0f;    // [-1, 1]: âm = vật cản bên trái
-  std::int32_t enc_l = 0;        // tick thô bánh trái
-  std::int32_t enc_r = 0;        // tick thô bánh phải
+  std::int32_t enc_l = 0;        // tick thô
+  std::int32_t enc_r = 0;        // tick thô
   float dt = 0.002f;             // giây
 };
 
@@ -51,24 +51,33 @@ struct TrackPlan {
     length = 0;
     baked = false;
   }
-  [[nodiscard]] bool empty() const { return length == 0; }
   [[nodiscard]] float steer_at(float tick) const;
   [[nodiscard]] float obstacle_at(float tick) const;
   [[nodiscard]] float throttle_at(float tick) const;
 };
 
-// Thuần gain, không đơn vị.
-struct TuneConfig {
+// Tầng 2 — hằng số robot, đo một lần, không đổi theo sa bàn. Thuần gain.
+struct RobotTuning {
   float steer_kp = 3.0f;
   float steer_kd = 0.15f;
   float d_filter_alpha = 0.5f;
-  float base_throttle = 0.5f;
   float corner_slowdown = 0.6f;   // grip proxy: 1 - corner_slowdown*|steer|
   float evasion_bias = 0.4f;      // lệch lái né vật cản
   float evasion_slowdown = 0.7f;  // giảm ga khi danger
+};
+
+// Tầng 3 — tham số phụ thuộc sa bàn, suy từ Run 1 (xem kernel/tuning.hpp).
+struct TrackTuning {
+  float base_throttle = 0.5f;
   float sprint_scale = 1.2f;
   float decel_per_tick = 0.02f;       // giảm ga tối đa mỗi tick (backward-pass)
   std::int32_t obstacle_window = 20;  // cửa sổ giãn obstacle_side (tick)
 };
 
-}  // namespace lf::kernel
+// Cấu hình đầy đủ truyền vào step(): robot (measure-once) + track (trim-on-track).
+struct TuneConfig {
+  RobotTuning robot;
+  TrackTuning track;
+};
+
+}

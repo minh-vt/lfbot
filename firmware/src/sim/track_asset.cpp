@@ -1,11 +1,11 @@
 #include "track_asset.hpp"
 
+#include <raylib.h>
+
 #include <cstddef>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <string>
-
-#include <raylib.h>
 
 namespace lf::sim {
 namespace {
@@ -44,7 +44,7 @@ void load_manifest(const json& doc, TrackManifest& manifest) {
   }
 }
 
-}  // namespace
+}
 
 bool TrackAsset::load(const std::string& manifest_path) {
   std::ifstream file(manifest_path);
@@ -84,4 +84,4 @@ unsigned char TrackAsset::sample_grayscale(float x_mm, float y_mm) const {
   return pixels_[index];
 }
 
-}  // namespace lf::sim
+}

@@ -1,7 +1,2 @@
 CompileFlags:
   CompilationDatabase: firmware
-  Add:
-    - -std=c++17
-    - -I/home/minhvt/Projects/lfbot/firmware/lib
-    - -I/home/minhvt/Projects/lfbot/firmware/src
-    - -DPLATFORM_DESKTOP

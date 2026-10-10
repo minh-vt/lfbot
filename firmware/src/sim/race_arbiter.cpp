@@ -66,4 +66,4 @@ Verdict RaceArbiter::verdict() const {
   return {completed_, lap_time_s_, infraction_};
 }
 
-}  // namespace lf::sim
+}

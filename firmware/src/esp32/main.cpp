@@ -6,8 +6,7 @@
 #include <cstdint>
 
 #include "actuators.hpp"
-#include "kernel/plan.hpp"
-#include "kernel/step.hpp"
+#include "kernel/mission.hpp"
 #include "sensors.hpp"
 
 namespace {
@@ -42,29 +41,21 @@ void control_task(void* /*arg*/) {
 
     lf::kernel::SensorFrame frame;
     lf::esp32::sensors_read(frame, kControlDt);
-    const auto result = lf::kernel::step(g_state, frame, g_plan, cfg);
-    g_state = result.state;
+    const lf::kernel::MotorCommand command =
+      lf::kernel::mission_step(g_state, frame, g_plan, g_mode, cfg);
+    lf::esp32::actuators_write(command);
 
-    if (g_mode == lf::kernel::RunMode::kRun1) {
-      const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
-      lf::kernel::record(g_plan, tick, result.path_steer, frame.obstacle_side);
-    }
-    lf::esp32::actuators_write(result.command);
-
-    if (g_mode == lf::kernel::RunMode::kRun1 && g_state.finish_latched) {
-      lf::kernel::bake(g_plan, cfg);
-      g_state = {};
-      g_mode = lf::kernel::RunMode::kRun2;
-    } else if (g_mode == lf::kernel::RunMode::kRun2 && g_state.finish_latched) {
+    const lf::kernel::MissionEvent event =
+      lf::kernel::advance_mission(g_plan, g_state, g_mode, cfg);
+    if (event == lf::kernel::MissionEvent::kRun2Done) {
       lf::esp32::actuators_write({0.0f, 0.0f, true});
-      g_mode = lf::kernel::RunMode::kDone;
     }
 
     vTaskDelayUntil(&last_wake, kControlPeriod);
   }
 }
 
-}  // namespace
+}
 
 extern "C" void app_main() {
   gpio_config_t buttons = {};

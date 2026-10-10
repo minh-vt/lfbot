@@ -22,4 +22,4 @@ float throttle_profile(float tick, float steer, const SensorFrame& f, const Trac
                        const TuneConfig& cfg);
 MotorCommand mix_differential(float throttle, float steer, bool brake);
 
-}  // namespace lf::kernel
+}

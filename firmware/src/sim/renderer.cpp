@@ -1,10 +1,10 @@
 #include "renderer.hpp"
 
+#include <raylib.h>
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
-
-#include <raylib.h>
 
 namespace lf::sim {
 namespace {
@@ -25,7 +25,7 @@ const char* mode_name(int mode) {
   }
 }
 
-}  // namespace
+}
 
 void Renderer::init(const TrackManifest& manifest) {
   const Image image = LoadImage(manifest.image_path.c_str());
@@ -95,4 +95,4 @@ void Renderer::end_frame() {
   EndDrawing();
 }
 
-}  // namespace lf::sim
+}
