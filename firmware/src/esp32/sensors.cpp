@@ -9,11 +9,12 @@
 #include <freertos/task.h>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
-#include "kernel/types.hpp"
-#include "layout/sensor_layout.hpp"
+#include "drive/types.hpp"
+#include "sensing/sensor_model.hpp"
 
 namespace lf::esp32 {
 namespace {
@@ -42,6 +43,11 @@ struct Hardware {
   i2c_master_dev_handle_t tof_left = nullptr;
 };
 Hardware g_hw;
+
+// ToF cập nhật nền; vòng 500Hz chỉ đọc cache (atomic), không bao giờ block.
+std::atomic<float> g_tof_front_mm{sensing::kTofRangeMm};
+std::atomic<float> g_tof_left_mm{sensing::kTofRangeMm};
+std::atomic<float> g_tof_right_mm{sensing::kTofRangeMm};
 
 // PCNT encoder (quadrature).
 void init_encoder(int gpio_a, int gpio_b, pcnt_unit_handle_t* unit) {
@@ -100,7 +106,7 @@ void tof_write_reg(i2c_master_dev_handle_t device, std::uint8_t reg, std::uint8_
 
 float tof_read_mm(i2c_master_dev_handle_t device) {
   if (device == nullptr) {
-    return layout::kTofRangeMm;
+    return sensing::kTofRangeMm;
   }
   tof_write_reg(device, 0x00, 0x01);  // SYSRANGE_START: single-shot
   vTaskDelay(pdMS_TO_TICKS(30));
@@ -109,7 +115,16 @@ float tof_read_mm(i2c_master_dev_handle_t device) {
   tof_write_reg(device, 0x0B, 0x01);  // SYSTEM_INTERRUPT_CLEAR
   const auto mm =
     static_cast<float>((static_cast<std::uint16_t>(msb) << 8) | static_cast<std::uint16_t>(lsb));
-  return (mm > 0.0f && mm < 2000.0f) ? mm : layout::kTofRangeMm;
+  return (mm > 0.0f && mm < 2000.0f) ? mm : sensing::kTofRangeMm;
+}
+
+// Quét 3 ToF nền (~30ms/con) → ghi cache. Vòng điều khiển chỉ đọc cache.
+void tof_task(void*) {
+  for (;;) {
+    g_tof_front_mm.store(tof_read_mm(g_hw.tof_front));
+    g_tof_left_mm.store(tof_read_mm(g_hw.tof_left));
+    g_tof_right_mm.store(tof_read_mm(g_hw.tof_right));
+  }
 }
 
 }
@@ -151,21 +166,23 @@ void sensors_init() {
     gpio_set_level(static_cast<gpio_num_t>(pin), 0);
   }
   // TODO(hw): bật XSHUT tuần tự + gán địa chỉ + init VL53L0X (datasheet).
+
+  xTaskCreatePinnedToCore(tof_task, "tof", 2048, nullptr, 1, nullptr, 0);
 }
 
-void sensors_read(lf::kernel::SensorFrame& frame, float dt) {
-  IrReadings ir;
-  for (std::size_t i = 0; i < layout::kIrOffsetsMm.size(); ++i) {
+void sensors_read(lf::drive::Readings& frame, float dt) {
+  sensing::IrReadings ir;
+  for (std::size_t i = 0; i < sensing::kIrOffsetsMm.size(); ++i) {
     int raw = 0;
     adc_oneshot_read(g_hw.adc, kIrChannel[i], &raw);
     ir.raw[i] = static_cast<std::uint16_t>(raw);
   }
-  const IrResult ir_result = normalize_ir(ir);
-  frame.line_error = ir_result.line_error;
-  frame.line_detected = ir_result.line_detected;
+  const sensing::IrResult ir_result = sensing::normalize_ir(ir);
+  frame.line_offset = ir_result.line_offset;
+  frame.line_certainty = ir_result.line_certainty;
 
-  kernel::normalize_tof(frame, layout::kTofRangeMm, tof_read_mm(g_hw.tof_front),
-                        tof_read_mm(g_hw.tof_left), tof_read_mm(g_hw.tof_right));
+  sensing::normalize_tof(frame, sensing::kTofRangeMm, g_tof_front_mm.load(), g_tof_left_mm.load(),
+                         g_tof_right_mm.load());
 
   frame.enc_l = read_encoder(g_hw.enc_left);
   frame.enc_r = read_encoder(g_hw.enc_right);

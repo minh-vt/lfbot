@@ -7,11 +7,11 @@ Tài liệu định nghĩa ngữ cảnh, quy tắc kiến trúc và hợp đồn
 ## 1. Tổng quan Dự án & Kiến trúc (Context Hierarchy Level 1)
 Robot tự hành dò line tốc độ cao và vượt chướng ngại vật thi đấu "F-Maze-Solving" (Đại học FPT).
 Mã nguồn được phân tách theo mô hình kiến trúc sâu (Deep Modules) với ranh giới phân tầng nghiêm ngặt:
-- **`firmware/lib/`**: Lõi C++17 độc lập phần cứng/OS — `kernel/` (thuật toán thuần, không-thứ-nguyên: `step`, `plan`) + `layout/` (chân lý phần cứng dùng chung: vị trí 8 cảm biến IR). Không phụ thuộc Arduino, FreeRTOS hay Raylib.
+- **`firmware/lib/`**: Lõi C++17 độc lập phần cứng/OS — `drive/` (thuật toán thuần, không-thứ-nguyên: `step`, `plan`) + `sensing/` (chân lý cảm biến + chuẩn hóa). Không phụ thuộc Arduino, FreeRTOS hay Raylib.
 - **`firmware/src/sim/`**: Môi trường mô phỏng máy tính để bàn (Raylib 2D), nhận diện vạch quang học (8 cảm biến IR) và ToF trên sa bàn 6000×1500 mm (vòng loại) / 10000×1500 mm (chung kết), 1 px = 1 mm.
 - **`firmware/src/esp32/`**: Firmware nhúng chạy trên vi điều khiển ESP32-S3 FreeRTOS (dual-core 240MHz, ADC-DMA, PCNT, MCPWM).
 - **`firmware/test/`**: Bộ kiểm thử tự động không đồ họa (Headless Native Tests).
-- **`.scratch/architecture-redesign/spec.md`**: Spec kiến trúc duy nhất (SSoT) — kernel không-thứ-nguyên + adapters (sim, esp32). Ticket triển khai tại `.scratch/architecture-redesign/issues/`.
+- **`.scratch/architecture-redesign/spec.md`**: Spec kiến trúc duy nhất (SSoT) — drive không-thứ-nguyên + adapters (sim, esp32). Ticket triển khai tại `.scratch/architecture-redesign/issues/`.
 
 ---
 
@@ -19,9 +19,9 @@ Mã nguồn được phân tách theo mô hình kiến trúc sâu (Deep Modules)
 - **Ngôn ngữ:** C++17 (Google C++ Style, 2-space indentation).
 - **Build System & Toolchain:** PlatformIO Core (Native GCC cho Desktop/Test, Espressif32 toolchain cho ESP32-S3).
 - **Task Runner:** `just` (quản trị toàn bộ lệnh thực thi).
-- **Linter & Formatter:** `clang-format` cho toàn bộ C++ (gồm `src/esp32`); `clang-tidy` cho code build được trên host (kernel/sim/test/header thuần) và `cppcheck` cho firmware ESP32-S3 (IDF không parse được bằng clang-tidy host). Policy 0 errors, 0 warnings.
+- **Linter & Formatter:** `clang-format` cho toàn bộ C++ (gồm `src/esp32`); `clang-tidy` cho code build được trên host (drive/sim/test/header thuần) và `cppcheck` cho firmware ESP32-S3 (IDF không parse được bằng clang-tidy host). Policy 0 errors, 0 warnings.
 - **Đồ họa & Mô phỏng:** Raylib Desktop (hỗ trợ cả GUI và chế độ xử lý ảnh Headless).
-- **Thư viện bên thứ ba:** `nlohmann-json` — chỉ dùng trong sim để parse manifest track; kernel và esp32 không phụ thuộc.
+- **Thư viện bên thứ ba:** `nlohmann-json` — chỉ dùng trong sim để parse manifest track; drive và esp32 không phụ thuộc.
 - **ESP32:** `framework = espidf` (ESP-IDF 6.1, bỏ Arduino). FreeRTOS task 500Hz (`vTaskDelayUntil` 2ms, core 1, entry `app_main`) + API IDF mới: `esp_adc/adc_oneshot.h`, `driver/pulse_cnt.h`, `driver/mcpwm_prelude.h`, `driver/i2c_master.h`. `src/CMakeLists.txt` chỉ biên dịch `esp32/*` (không `src/sim`). Build cần venv `uv` (`.venv`) có pip; env esp32s3 dùng `build_unflags=-std=gnu++11`.
 
 ---
@@ -37,7 +37,7 @@ just sim          # Chay mo phong GUI Raylib Desktop (danh cho nguoi dung quan s
 just format       # Tu dong format toan bo ma nguon C++ bang clang-format
 just format-check # Kiem tra format (dung cho CI/CD)
 just lint         # Kiem tra tinh: clang-tidy (native) + cppcheck (esp32)
-just lint-native  # clang-tidy voi firmware/compile_commands.json (kernel/sim/test)
+just lint-native  # clang-tidy voi firmware/compile_commands.json (drive/sim/test)
 just lint-esp32   # cppcheck cho firmware ESP32-S3 (pio check -e esp32s3)
 just lint-fix     # Tu dong sua loi clang-tidy va format lai code
 just compiledb    # Cap nhat database bien dich compile_commands.json
@@ -56,8 +56,8 @@ just track        # Sinh sa ban procedural ngau nhien (generate_track.py)
 3. **Chuẩn mã nguồn sạch:**
    - 100% mã nguồn C++ tuân thủ quy tắc 2-space của `.clang-format`.
    - Biên dịch với cờ `-Wall -Wextra -Wpedantic` không phát sinh bất kỳ cảnh báo nào.
-4. **Bảo tồn thuật ngữ SSoT:**
-   - Tuân thủ nghiêm ngặt các khái niệm định nghĩa trong `docs/CONTEXT.md`: `RawTrace`, `TrackCorridor`, `RacingTrajectory`, `LateApex`, `FrictionEnvelope`, `Centroid`, `TrajectoryFollower`, `RobotCoordinator`.
+4. **Đặt tên theo việc robot làm (Linux-style):**
+   - Tên = động từ/danh từ việc robot làm (`steer_to_line`, `plan_speed`, `avoid_obstacle`), KHÔNG phải lý thuyết (PD, feedforward, backward-pass). Lý thuyết nằm trong comment/implementation. Xem `docs/NAMING.md`.
 
 ---
 

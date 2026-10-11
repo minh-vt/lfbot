@@ -6,7 +6,8 @@
 #include <cstdint>
 
 #include "actuators.hpp"
-#include "kernel/mission.hpp"
+#include "drive/plan.hpp"
+#include "drive/step.hpp"
 #include "sensors.hpp"
 
 namespace {
@@ -17,9 +18,9 @@ constexpr int kButtonStart = 48;
 constexpr int kButtonMode = 47;
 
 // Plan ở BSS (48KB) — không nằm trên stack task.
-lf::kernel::TrackPlan g_plan;
-lf::kernel::KernelState g_state;
-lf::kernel::RunMode g_mode = lf::kernel::RunMode::kIdle;
+lf::drive::RacePlan g_plan;
+lf::drive::DriveState g_state;
+lf::drive::RunMode g_mode = lf::drive::RunMode::kIdle;
 
 bool button_pressed(int pin) {
   return gpio_get_level(static_cast<gpio_num_t>(pin)) == 0;
@@ -27,28 +28,36 @@ bool button_pressed(int pin) {
 
 // Vòng điều khiển 500Hz hard real-time (FreeRTOS task, core 1).
 void control_task(void* /*arg*/) {
-  const lf::kernel::TuneConfig cfg;
+  const lf::drive::Tuning cfg;
   TickType_t last_wake = xTaskGetTickCount();
 
   for (;;) {
-    if (button_pressed(kButtonStart) && g_mode == lf::kernel::RunMode::kIdle) {
-      g_mode = lf::kernel::RunMode::kRun1;
+    if (button_pressed(kButtonStart) && g_mode == lf::drive::RunMode::kIdle) {
+      g_mode = lf::drive::RunMode::kRun1;
     }
-    if (button_pressed(kButtonMode) && g_mode == lf::kernel::RunMode::kDone) {
-      g_mode = lf::kernel::RunMode::kIdle;
+    if (button_pressed(kButtonMode) && g_mode == lf::drive::RunMode::kDone) {
+      g_mode = lf::drive::RunMode::kIdle;
       g_plan.reset();
     }
 
-    lf::kernel::SensorFrame frame;
+    lf::drive::Readings frame;
     lf::esp32::sensors_read(frame, kControlDt);
-    const lf::kernel::MotorCommand command =
-      lf::kernel::mission_step(g_state, frame, g_plan, g_mode, cfg);
-    lf::esp32::actuators_write(command);
+    const auto result = lf::drive::step(g_state, frame, g_plan, cfg);
+    g_state = result.state;
+    if (g_mode == lf::drive::RunMode::kRun1) {
+      const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
+      lf::drive::record(g_plan, tick, result.path_steer, frame.obstacle_side);
+    }
+    lf::esp32::actuators_write(result.command);
 
-    const lf::kernel::MissionEvent event =
-      lf::kernel::advance_mission(g_plan, g_state, g_mode, cfg);
-    if (event == lf::kernel::MissionEvent::kRun2Done) {
+    if (g_mode == lf::drive::RunMode::kRun1 && g_state.finish_latched) {
+      lf::drive::plan_speed(g_plan, cfg);
+      g_state = {};
+      g_mode = lf::drive::RunMode::kRun2;
+    }
+    if (g_mode == lf::drive::RunMode::kRun2 && g_state.finish_latched) {
       lf::esp32::actuators_write({0.0f, 0.0f, true});
+      g_mode = lf::drive::RunMode::kDone;
     }
 
     vTaskDelayUntil(&last_wake, kControlPeriod);

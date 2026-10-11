@@ -2,18 +2,18 @@
 
 #include <cstdint>
 
-#include "kernel/types.hpp"
+#include "drive/types.hpp"
 #include "sim_config.hpp"
 #include "track_asset.hpp"
 
 namespace lf::sim {
 
-// Vật lý vi sai + cảm biến (physical ↔ normalized), adapter cho kernel.
+// Vật lý vi sai + cảm biến (physical ↔ normalized), adapter cho drive.
 class WorldPhysics {
 public:
   void reset(const TrackManifest& manifest);
-  void step(const lf::kernel::MotorCommand& cmd, float dt);
-  void sample(lf::kernel::SensorFrame& frame, float dt, const TrackAsset& track) const;
+  void step(const lf::drive::DriveCommand& cmd, float dt);
+  void sample(lf::drive::Readings& frame, float dt, const TrackAsset& track) const;
 
   [[nodiscard]] float x() const { return x_; }
   [[nodiscard]] float y() const { return y_; }

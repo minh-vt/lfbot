@@ -1,6 +1,7 @@
 #include <cstdio>
 
-#include "kernel/mission.hpp"
+#include "drive/plan.hpp"
+#include "drive/step.hpp"
 #include "race_arbiter.hpp"
 #include "track_asset.hpp"
 #include "world_physics.hpp"
@@ -27,10 +28,10 @@ int main() {
   sim::RaceArbiter arbiter;
   arbiter.reset(track.manifest());
 
-  const kernel::TuneConfig cfg;
-  kernel::KernelState state;
-  kernel::TrackPlan plan;
-  kernel::RunMode mode = kernel::RunMode::kRun1;
+  const drive::Tuning cfg;
+  drive::DriveState state;
+  drive::RacePlan plan;
+  drive::RunMode mode = drive::RunMode::kRun1;
   float run_elapsed = 0.0f;
   float run1_time = 0.0f;
   float run2_time = 0.0f;
@@ -38,35 +39,43 @@ int main() {
   sim::Verdict run2_verdict;
 
   int steps = 0;
-  while (steps++ < kMaxSteps && mode != kernel::RunMode::kDone) {
-    kernel::SensorFrame frame;
+  while (steps++ < kMaxSteps && mode != drive::RunMode::kDone) {
+    drive::Readings frame;
     world.sample(frame, kDt, track);
     if (steps % 2000 == 0) {
-      (void)std::printf("  [s=%5d t=%.0fs] pos=(%.0f,%.0f) th=%3.0f err=%+.2f line=%d\n", steps,
+      (void)std::printf("  [s=%5d t=%.0fs] pos=(%.0f,%.0f) th=%3.0f err=%+.2f cert=%.2f\n", steps,
                         run_elapsed, world.x(), world.y(), world.theta() * (180.0f / sim::kPi),
-                        frame.line_error, frame.line_detected ? 1 : 0);
+                        frame.line_offset, frame.line_certainty);
     }
-    const kernel::MotorCommand command = kernel::mission_step(state, frame, plan, mode, cfg);
-    world.step(command, kDt);
-    arbiter.observe(world.x(), world.y(), world.v(), frame.line_detected, kDt);
+    const auto result = drive::step(state, frame, plan, cfg);
+    state = result.state;
+    if (mode == drive::RunMode::kRun1) {
+      const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
+      drive::record(plan, tick, result.path_steer, frame.obstacle_side);
+    }
+    world.step(result.command, kDt);
+    arbiter.observe(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, kDt);
     run_elapsed += kDt;
 
-    const kernel::MissionEvent event = kernel::advance_mission(plan, state, mode, cfg);
-    if (event == kernel::MissionEvent::kRun1Done) {
+    if (mode == drive::RunMode::kRun1 && state.finish_latched) {
       run1_verdict = arbiter.verdict();
       run1_time = run_elapsed;
+      drive::plan_speed(plan, cfg);
       world.reset(track.manifest());
       arbiter.reset(track.manifest());
+      state = {};
       run_elapsed = 0.0f;
-    } else if (event == kernel::MissionEvent::kRun2Done) {
+      mode = drive::RunMode::kRun2;
+    } else if (mode == drive::RunMode::kRun2 && state.finish_latched) {
       run2_verdict = arbiter.verdict();
       run2_time = run_elapsed;
+      mode = drive::RunMode::kDone;
     }
   }
 
   (void)std::printf("test_sim: steps=%d  Run1=%.2fs (%s)  Run2=%.2fs (%s)  plan=%zu ticks\n", steps,
                     run1_time, run1_verdict.completed ? "OK" : "DQ", run2_time,
-                    run2_verdict.completed ? "OK" : "DQ", plan.steer_ff.size());
+                    run2_verdict.completed ? "OK" : "DQ", plan.planned_steer.size());
 
   bool pass = true;
   if (!run1_verdict.completed) {

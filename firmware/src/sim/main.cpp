@@ -2,7 +2,8 @@
 
 #include <algorithm>
 
-#include "kernel/mission.hpp"
+#include "drive/plan.hpp"
+#include "drive/step.hpp"
 #include "race_arbiter.hpp"
 #include "renderer.hpp"
 #include "track_asset.hpp"
@@ -13,7 +14,7 @@ namespace {
 constexpr const char* kManifestPath = "assets/track_vongloai.json";
 
 struct MissionRun {
-  lf::kernel::RunMode mode = lf::kernel::RunMode::kIdle;
+  lf::drive::RunMode mode = lf::drive::RunMode::kIdle;
   float elapsed = 0.0f;
   float run1_time = 0.0f;
   float run2_time = 0.0f;
@@ -21,26 +22,32 @@ struct MissionRun {
 
 // Một tick vật lý + điều khiển (Run 1: ghi plan; chạm finish: chuyển mode).
 void advance_run(MissionRun& mission, lf::sim::WorldPhysics& world, lf::sim::RaceArbiter& arbiter,
-                 const lf::sim::TrackAsset& track, lf::kernel::KernelState& state,
-                 lf::kernel::TrackPlan& plan, const lf::kernel::TuneConfig& cfg, float dt) {
+                 const lf::sim::TrackAsset& track, lf::drive::DriveState& state,
+                 lf::drive::RacePlan& plan, const lf::drive::Tuning& cfg, float dt) {
   mission.elapsed += dt;
 
-  lf::kernel::SensorFrame frame;
+  lf::drive::Readings frame;
   world.sample(frame, dt, track);
-  const lf::kernel::MotorCommand command =
-    lf::kernel::mission_step(state, frame, plan, mission.mode, cfg);
-  world.step(command, dt);
-  arbiter.observe(world.x(), world.y(), world.v(), frame.line_detected, dt);
+  const auto result = lf::drive::step(state, frame, plan, cfg);
+  state = result.state;
+  if (mission.mode == lf::drive::RunMode::kRun1) {
+    const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
+    lf::drive::record(plan, tick, result.path_steer, frame.obstacle_side);
+  }
+  world.step(result.command, dt);
+  arbiter.observe(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, dt);
 
-  const lf::kernel::MissionEvent event =
-    lf::kernel::advance_mission(plan, state, mission.mode, cfg);
-  if (event == lf::kernel::MissionEvent::kRun1Done) {
+  if (mission.mode == lf::drive::RunMode::kRun1 && state.finish_latched) {
     mission.run1_time = mission.elapsed;
+    lf::drive::plan_speed(plan, cfg);
     world.reset(track.manifest());
     arbiter.reset(track.manifest());
+    state = {};
     mission.elapsed = 0.0f;
-  } else if (event == lf::kernel::MissionEvent::kRun2Done) {
+    mission.mode = lf::drive::RunMode::kRun2;
+  } else if (mission.mode == lf::drive::RunMode::kRun2 && state.finish_latched) {
     mission.run2_time = mission.elapsed;
+    mission.mode = lf::drive::RunMode::kDone;
   }
 }
 
@@ -60,9 +67,9 @@ int main() {
   sim::RaceArbiter arbiter;
   arbiter.reset(track.manifest());
 
-  const kernel::TuneConfig cfg;
-  kernel::KernelState state;
-  kernel::TrackPlan plan;
+  const drive::Tuning cfg;
+  drive::DriveState state;
+  drive::RacePlan plan;
   MissionRun mission;
 
   sim::Renderer renderer;
@@ -78,17 +85,17 @@ int main() {
       plan.reset();
       mission = {};
     }
-    if (IsKeyPressed(KEY_SPACE) && mission.mode == kernel::RunMode::kIdle) {
-      mission.mode = kernel::RunMode::kRun1;
+    if (IsKeyPressed(KEY_SPACE) && mission.mode == drive::RunMode::kIdle) {
+      mission.mode = drive::RunMode::kRun1;
     }
     if (IsKeyPressed(KEY_ONE)) {
-      mission.mode = kernel::RunMode::kRun1;
+      mission.mode = drive::RunMode::kRun1;
     }
     if (IsKeyPressed(KEY_TWO)) {
-      mission.mode = kernel::RunMode::kRun2;
+      mission.mode = drive::RunMode::kRun2;
     }
 
-    if (mission.mode == kernel::RunMode::kRun1 || mission.mode == kernel::RunMode::kRun2) {
+    if (mission.mode == drive::RunMode::kRun1 || mission.mode == drive::RunMode::kRun2) {
       advance_run(mission, world, arbiter, track, state, plan, cfg, dt);
     }
 

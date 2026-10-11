@@ -4,6 +4,7 @@ min_acyclicity = 0.99
 max_cycles = 0
 
 # Layer order: số nhỏ = tầng trên (được phép phụ thuộc tầng dưới).
+# drive ở đáy vì nó cung cấp contract types (Readings/DriveCommand) cho mọi tầng.
 [[layers]]
 name = "sim"
 order = 1
@@ -15,11 +16,11 @@ order = 1
 paths = ["firmware/src/esp32/**"]
 
 [[layers]]
-name = "kernel"
+name = "sensing"
 order = 2
-paths = ["firmware/lib/kernel/**"]
+paths = ["firmware/lib/sensing/**"]
 
 [[layers]]
-name = "layout"
+name = "drive"
 order = 3
-paths = ["firmware/lib/layout/**"]
+paths = ["firmware/lib/drive/**"]

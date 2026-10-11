@@ -63,6 +63,12 @@ void init_motor(int gpio_pwm, int gpio_dir, Motor& motor) {
   mcpwm_timer_start_stop(motor.timer, MCPWM_TIMER_START_NO_STOP);
 }
 
+// Phanh động: cầu H short motor (cả 2 chân HIGH) → dừng nhanh, không trôi.
+void brake_motor(const Motor& motor) {
+  mcpwm_comparator_set_compare_value(motor.cmp_pwm, kPeriodTicks);
+  mcpwm_comparator_set_compare_value(motor.cmp_dir, kPeriodTicks);
+}
+
 // duty ∈ [-1,1]: dương → PWM ở kênh pwm (dir=0); âm → ngược lại.
 void set_motor(const Motor& motor, float duty) {
   const float magnitude = std::min(1.0f, std::abs(duty));
@@ -83,10 +89,10 @@ void actuators_init() {
   init_motor(kRightPwm, kRightDir, g_right);
 }
 
-void actuators_write(const lf::kernel::MotorCommand& cmd) {
+void actuators_write(const lf::drive::DriveCommand& cmd) {
   if (cmd.brake) {
-    set_motor(g_left, 0.0f);
-    set_motor(g_right, 0.0f);
+    brake_motor(g_left);
+    brake_motor(g_right);
     return;
   }
   set_motor(g_left, cmd.left_duty);

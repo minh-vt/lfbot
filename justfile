@@ -29,7 +29,7 @@ format-check:
 # Kiem tra tinh ma nguon: clang-tidy cho native + cppcheck cho esp32
 lint: lint-native lint-esp32
 
-# clang-tidy cho code build duoc tren host (kernel, sim, test, header thuần esp32)
+# clang-tidy cho code build duoc tren host (kernel, sensing, sim, test)
 lint-native:
     clang-tidy -p firmware/compile_commands.json firmware/lib/*/*.cpp firmware/src/sim/*.cpp firmware/test/*.cpp
 
@@ -42,10 +42,9 @@ lint-fix:
     clang-tidy -p firmware/compile_commands.json --fix --fix-errors firmware/lib/*/*.cpp firmware/src/sim/*.cpp firmware/test/*.cpp
     just format
 
-# Tao lai database compile_commands.json cho linter va clangd (native + esp32)
+# Tao lai database compile_commands.json (native-only; esp32 editor mờ — chấp nhận)
 compiledb:
     cd firmware && pio run -e lint -t compiledb
-    python3 tools/gen_compiledb.py
 
 # Chuan hoa sa ban tu anh thuc te AI (Vong loai 6000x1500, Chung ket 10000x1500)
 track:

@@ -3,8 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "kernel/normalize.hpp"
-#include "layout/sensor_layout.hpp"
+#include "sensing/sensor_model.hpp"
 
 namespace lf::sim {
 namespace {
@@ -51,7 +50,7 @@ void WorldPhysics::reset(const TrackManifest& manifest) {
   wheel_ticks_r_ = 0.0f;
 }
 
-void WorldPhysics::step(const lf::kernel::MotorCommand& cmd, float dt) {
+void WorldPhysics::step(const lf::drive::DriveCommand& cmd, float dt) {
   const float velocity_left = cmd.left_duty * kMaxWheelSpeedMps;
   const float velocity_right = cmd.right_duty * kMaxWheelSpeedMps;
   v_ = 0.5f * (velocity_left + velocity_right);
@@ -67,19 +66,19 @@ float WorldPhysics::ray_tof(float ox, float oy, float base_theta, float offset) 
   const float angle = base_theta + offset;
   const float dx = std::cos(angle);
   const float dy = std::sin(angle);
-  float best = layout::kTofRangeMm;
+  float best = sensing::kTofRangeMm;
   for (const auto& obstacle : manifest_.obstacles) {
     const float half_w = obstacle.width_mm * 0.5f;
     const float half_h = obstacle.height_mm * 0.5f;
     const float distance =
       ray_aabb(ox, oy, dx, dy, obstacle.x_mm - half_w, obstacle.y_mm - half_h,
-               obstacle.x_mm + half_w, obstacle.y_mm + half_h, layout::kTofRangeMm);
+               obstacle.x_mm + half_w, obstacle.y_mm + half_h, sensing::kTofRangeMm);
     best = std::min(best, distance);
   }
   return best;
 }
 
-void WorldPhysics::sample(lf::kernel::SensorFrame& frame, float dt, const TrackAsset& track) const {
+void WorldPhysics::sample(lf::drive::Readings& frame, float dt, const TrackAsset& track) const {
   frame.dt = dt;
   frame.enc_l = static_cast<std::int32_t>(wheel_ticks_l_);
   frame.enc_r = static_cast<std::int32_t>(wheel_ticks_r_);
@@ -92,7 +91,7 @@ void WorldPhysics::sample(lf::kernel::SensorFrame& frame, float dt, const TrackA
 
   float weight_sum = 0.0f;
   float weighted_pos = 0.0f;
-  for (const float offset : layout::kIrOffsetsMm) {
+  for (const float offset : sensing::kIrOffsetsMm) {
     const float sample_x = front_x + offset * perp_x;
     const float sample_y = front_y + offset * perp_y;
     const auto gray = static_cast<float>(track.sample_grayscale(sample_x, sample_y));
@@ -100,19 +99,19 @@ void WorldPhysics::sample(lf::kernel::SensorFrame& frame, float dt, const TrackA
     weight_sum += weight;
     weighted_pos += weight * offset;
   }
-  if (weight_sum < 1e-3f) {
-    frame.line_detected = false;
-    frame.line_error = 0.0f;
-  } else {
-    frame.line_detected = true;
-    frame.line_error = std::clamp((weighted_pos / weight_sum) / layout::kIrHalfSpanMm, -1.0f, 1.0f);
+  frame.line_certainty = std::clamp(weight_sum, 0.0f, 1.0f);
+  frame.line_offset = 0.0f;
+  if (weight_sum >= 1e-3f) {
+    frame.line_offset =
+      std::clamp((weighted_pos / weight_sum) / sensing::kIrHalfSpanMm, -1.0f, 1.0f);
   }
 
   // ToF: 3 tia (front, trái, phải).
   const float distance_front = ray_tof(front_x, front_y, theta_, 0.0f);
   const float distance_left = ray_tof(front_x, front_y, theta_, -0.4f);
   const float distance_right = ray_tof(front_x, front_y, theta_, 0.4f);
-  kernel::normalize_tof(frame, layout::kTofRangeMm, distance_front, distance_left, distance_right);
+  sensing::normalize_tof(frame, sensing::kTofRangeMm, distance_front, distance_left,
+                         distance_right);
 
   // Finish: tâm robot vào ô đích.
   frame.finish_detected = (x_ >= manifest_.finish_min_x && x_ <= manifest_.finish_max_x &&

@@ -2,6 +2,28 @@
 
 Du an: LF-BOT-2026 (F-Maze-Solving)
 
+## 0. Quyet dinh san pham
+
+### Hai banh chu dong, khong bon banh
+
+Luc bam khi cua la he so ma sat nhan voi luc ep len banh chu dong. Banh bi dong khong sinh them luc bam, no chi chia bot trong luong khoi hai banh chu dong va cong them luc can lan. Banh bi dong co dinh huong con truot ngang khi queo.
+
+Giu hai banh chu dong phia sau, phia truoc mot diem tua ma sat thap (mieng truot teflon duoi thanh cam bien, hoac bi caster nho). Giu khoang 70% trong luong len banh chu dong. Neu phanh gap lam thanh cam bien nhac len, them mot mieng truot phia sau, khong can banh thu tu.
+
+### Cam bien vat can: ba chiec VL53L0X, khong VL53L1X
+
+Vat can la hop 105x60 mm, mau bat ky, dat tren san trang. Cam bien hong ngoai phan xa loai re do do phan xa nen khong phan biet duoc hop mau den voi nen trang. Sieu am thi cham, chum rong, va nhieu chiec soi nhau. ToF do khoang cach that nen khong phu thuoc mau. VL53L0X la ToF re nhat ban o Viet Nam, do 2 m du cho ca hai pass. Pass 2 can khoang 0.7 m de phanh tu 2 m/s, 2 m la du. VL53L1X do 4 m khong can.
+
+Ba chiec: truoc, trai, phai, de robot chon phia tranh theo du lieu thay vi co dinh mot ben. Cai dang ton tien nhat la firmware doc ToF chan 30 ms moi chiec trong vong 2 ms. Sua thanh doc khong chan truoc khi tinh doi cam bien.
+
+### Mua module, khong han chip kho
+
+VL53L0X va MPU6050 la goi LGA/QFN, han tay de hong. Dung module breakout co san (GY-530, GY-521), cam qua header I2C. Chi tu han nhung gi de: driver SOIC-8, tro, tu. Neu can nhe va gon thi gop thanh mot mach rieng, lam sau khi da chay on.
+
+### Khac biet nam o do bam, khong phai cam bien
+
+Cam bien vat can chi can lam dung viec. Tien bo vao lop silicone va giam khoi luong, do moi la cho lam tang toc do. Cam bien dung muc toi thieu.
+
 ## 1. Phan bo chan ESP32-S3
 
 Luu y khi ve so do nguyen ly tren KiCAD:
