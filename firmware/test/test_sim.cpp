@@ -2,6 +2,7 @@
 
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
+#include "speed_limit_calibration.hpp"
 #include "track_asset.hpp"
 #include "track_rules.hpp"
 #include "world_physics.hpp"
@@ -49,7 +50,9 @@ int main() {
   sim::TrackRules rules;
   rules.reset(track.manifest());
 
-  const drive::Tuning cfg;
+  drive::Tuning cfg;
+  cfg.robot.speed_limit_table =
+    sim::calibrate_speed_limit(cfg.robot, sim::kMaxWheelSpeedMps * sim::kTicksPerMeter);
   drive::DriveState state;
   drive::RacePlan plan;
   drive::RunMode mode = drive::RunMode::kRun1;
@@ -63,13 +66,14 @@ int main() {
   while (steps++ < kMaxSteps && mode != drive::RunMode::kDone) {
     drive::Readings frame;
     world.sample(frame, kDt, track);
-    if (steps % 2000 == 0) {
-      (void)std::printf("  [s=%5d t=%.0fs] pos=(%.0f,%.0f) th=%3.0f err=%+.2f cert=%.2f\n", steps,
-                        run_elapsed, world.x(), world.y(), world.theta() * (180.0f / sim::kPi),
-                        frame.line_offset, frame.line_certainty);
-    }
     const auto result = drive::step(state, frame, plan, cfg);
     state = result.state;
+    if (steps % 2000 == 0) {
+      (void)std::printf(
+        "  [s=%5d t=%.0fs] pos=(%.0f,%.0f) th=%3.0f err=%+.2f cert=%.2f v=%.2f st=%+.2f spd=%.2f\n",
+        steps, run_elapsed, world.x(), world.y(), world.theta() * (180.0f / sim::kPi),
+        frame.line_offset, frame.line_certainty, world.v(), result.path_steer, state.run1_speed);
+    }
     if (mode == drive::RunMode::kRun1) {
       const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
       drive::record(plan, tick, result.path_steer, frame.obstacle_side);

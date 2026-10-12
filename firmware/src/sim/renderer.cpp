@@ -24,8 +24,13 @@ constexpr Color kTextPrimary = {244, 244, 245, 255};  // #f4f4f5
 constexpr Color kZincWhite = {250, 250, 250, 255};
 constexpr Color kAmberAlert = {245, 158, 11, 255};  // #f59e0b
 
-constexpr float kTopBarBaseH = 64.0f;
-constexpr float kDockBaseH = 76.0f;
+// Ticket 31: hệ font CSS-rem-like, neo 1080p = 18px, clamp [14, 38] tránh cực đoan.
+inline constexpr float kRemBasePx = 18.0f;
+inline constexpr float kRemRefHeight = 1080.0f;
+
+float root_rem(float screen_h) {
+  return std::clamp(screen_h * (kRemBasePx / kRemRefHeight), 14.0f, 38.0f);
+}
 
 const char* run_mode_name(int mode) {
   switch (mode) {
@@ -43,10 +48,6 @@ const char* run_mode_name(int mode) {
 void draw_text_bold(const char* text, int x, int y, int size, Color color) {
   DrawText(text, x, y, size, color);
   DrawText(text, x + 1, y, size, color);
-}
-
-int scaled_font_size(int base_size, float ui_scale) {
-  return std::max(32, static_cast<int>(static_cast<float>(base_size) * ui_scale));
 }
 
 }  // namespace
@@ -69,9 +70,7 @@ void Renderer::reload_track(const TrackManifest& manifest) {
 
   const auto screen_w = static_cast<float>(GetScreenWidth());
   const auto screen_h = static_cast<float>(GetScreenHeight());
-  const float scale_y = screen_h / 1080.0f;
-  const float ui_scale = std::max(1.0f, scale_y);
-  const float dock_total_h = (kTopBarBaseH + kDockBaseH) * ui_scale + 40.0f;
+  const float dock_total_h = 7.8f * root_rem(screen_h);
 
   overview_scale_ = std::min((screen_w - 80.0f) / manifest.arena_width_mm,
                              (screen_h - dock_total_h) / manifest.arena_height_mm);
@@ -110,9 +109,7 @@ void Renderer::update_camera(float rx, float ry, float theta, float v, float dt,
                              const TrackManifest& manifest) {
   const auto screen_w = static_cast<float>(GetScreenWidth());
   const auto screen_h = static_cast<float>(GetScreenHeight());
-  const float scale_y = screen_h / 1080.0f;
-  const float ui_scale = std::max(1.0f, scale_y);
-  const float dock_total_h = (kTopBarBaseH + kDockBaseH) * ui_scale + 40.0f;
+  const float dock_total_h = 7.8f * root_rem(screen_h);
 
   overview_scale_ = std::min((screen_w - 80.0f) / manifest.arena_width_mm,
                              (screen_h - dock_total_h) / manifest.arena_height_mm);
@@ -155,9 +152,9 @@ void Renderer::draw_ghost_chassis(float rx, float ry, float theta) {
   DrawLineEx(p4, p1, 1.8f, Color{113, 113, 122, 100});
 }
 
-void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer,
-                            const std::array<float, 8>& ir_weights, float d_front, float d_left,
-                            float d_right) {
+void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, float curvature,
+                            float speed_limit, const std::array<float, 8>& ir_weights,
+                            float d_front, float d_left, float d_right) {
   const float cos_t = std::cos(theta);
   const float sin_t = std::sin(theta);
   const float front_x = rx + kSensorLookaheadMm * cos_t;
@@ -236,6 +233,36 @@ void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer,
   };
   DrawLineEx(Vector2{front_x, front_y}, needle_tip, 2.0f, Color{250, 250, 250, 220});
   DrawCircleV(needle_tip, 2.5f, Color{250, 250, 250, 220});
+
+  // Predictive Arc (ticket 32): cung quỹ đạo theo κ (geometry thuần).
+  draw_predictive_arc(rx, ry, theta, curvature, speed_limit);
+}
+
+// Cung quỹ đạo dự báo (ticket 32): tích phân heading theo κ = 2·steer/L (1/mm).
+void Renderer::draw_predictive_arc(float rx, float ry, float theta, float curvature,
+                                   float speed_limit) {
+  const float abs_k = std::abs(curvature);
+  if (abs_k < 1e-3f) {
+    return;  // thẳng → kim path_steer đã đủ
+  }
+  const Color col = (speed_limit < 0.7f) ? Color{245, 158, 11, 220} : Color{56, 189, 248, 180};
+  const float kappa_mm = 2.0f * abs_k / kWheelSeparationMm;  // 1/mm
+  const float sign = (curvature > 0.0f) ? 1.0f : -1.0f;
+  constexpr float kArcLenMm = 250.0f;
+  constexpr int kSeg = 16;
+  const float step = kArcLenMm / static_cast<float>(kSeg);
+  float px = rx + kRobotHalfLengthMm * std::cos(theta);
+  float py = ry + kRobotHalfLengthMm * std::sin(theta);
+  float ph = theta;
+  Vector2 prev = {px, py};
+  for (int i = 0; i < kSeg; ++i) {
+    ph += sign * kappa_mm * step;
+    px += step * std::cos(ph);
+    py += step * std::sin(ph);
+    const Vector2 cur = {px, py};
+    DrawLineEx(prev, cur, 3.0f, col);
+    prev = cur;
+  }
 }
 
 void Renderer::draw_trail_run1(const std::vector<TracePoint>& trace,
@@ -266,6 +293,10 @@ void Renderer::draw_trail_run1(const std::vector<TracePoint>& trace,
 
       if (std::abs(trace[prev_idx].obstacle_side) > 0.05f) {
         DrawCircleV(p1, 2.0f, Color{245, 158, 11, 140});
+      }
+      // Curvature Ribbon (ticket 32): chấm Apex tại cua gắt.
+      if (std::abs(trace[prev_idx].line_curve_val) >= 0.3f) {
+        DrawCircleV(p1, 3.0f, Color{245, 158, 11, 200});
       }
     } else {
       DrawLineEx(p1, p2, 2.0f, Color{113, 113, 122, 110});
@@ -340,20 +371,18 @@ void Renderer::draw_world(const TrackManifest& manifest, const RenderFrame& fram
   }
 
   // Xe chính
-  draw_chassis(frame.x, frame.y, frame.theta, frame.path_steer, frame.ir_weights, frame.tof_front,
-               frame.tof_left, frame.tof_right);
+  draw_chassis(frame.x, frame.y, frame.theta, frame.path_steer, frame.curvature, frame.speed_limit,
+               frame.ir_weights, frame.tof_front, frame.tof_left, frame.tof_right);
 }
 
 void Renderer::draw_top_dock(const TrackManifest& manifest, const RenderFrame& frame) const {
   const auto screen_w = static_cast<float>(GetScreenWidth());
   const auto screen_h = static_cast<float>(GetScreenHeight());
-  const float scale_x = screen_w / 1920.0f;
-  const float scale_y = screen_h / 1080.0f;
-  const float ui_scale = std::max(1.0f, std::min(scale_x, scale_y));
-
-  const float top_bar_h = std::max(kTopBarBaseH, kTopBarBaseH * ui_scale);
-  const int font_sz = scaled_font_size(32, ui_scale);
+  const float rem = root_rem(screen_h);
+  const float top_bar_h = 3.0f * rem;
+  const int font_sz = static_cast<int>(rem);
   const int text_y = static_cast<int>((top_bar_h - static_cast<float>(font_sz)) * 0.5f);
+  const int pad = static_cast<int>(1.3f * rem);
 
   DrawRectangle(0, 0, static_cast<int>(screen_w), static_cast<int>(top_bar_h),
                 Color{14, 16, 19, 245});
@@ -362,7 +391,7 @@ void Renderer::draw_top_dock(const TrackManifest& manifest, const RenderFrame& f
 
   std::array<char, 128> text_buf{};
   (void)std::snprintf(text_buf.data(), text_buf.size(), "TRACK: %s", manifest.name.c_str());
-  draw_text_bold(text_buf.data(), 24, text_y, font_sz, kZincWhite);
+  draw_text_bold(text_buf.data(), pad, text_y, font_sz, kZincWhite);
 
   Color mode_color = kBorderGray;
   if (frame.mode == 2) {
@@ -381,24 +410,31 @@ void Renderer::draw_top_dock(const TrackManifest& manifest, const RenderFrame& f
 
   const char* cam_name = chase_camera_ ? "CHASE CAM" : "OVERVIEW";
   const char* play_state = frame.paused ? "PAUSED" : "RUNNING";
-  (void)std::snprintf(text_buf.data(), text_buf.size(), "%s | %.2fx | %s", cam_name,
-                      frame.playback_speed, play_state);
+  const float r_m = (std::abs(frame.curvature) > 1e-3f)
+                      ? (kWheelSeparationMm / (2.0f * std::abs(frame.curvature))) / 1000.0f
+                      : 999.0f;
+  const char* curve_tag = "THANG";
+  if (r_m <= 0.7f) {
+    curve_tag = "CUA GAT";
+  } else if (r_m <= 2.0f) {
+    curve_tag = "CUA NHE";
+  }
+  (void)std::snprintf(text_buf.data(), text_buf.size(), "%s | %.2fx | %s  R=%.2fm [%s]", cam_name,
+                      frame.playback_speed, play_state, r_m, curve_tag);
   const int cam_w = MeasureText(text_buf.data(), font_sz);
-  const int cam_x = static_cast<int>(screen_w) - cam_w - 24;
+  const int cam_x = static_cast<int>(screen_w) - cam_w - pad;
   draw_text_bold(text_buf.data(), cam_x, text_y, font_sz, frame.paused ? kAmberAlert : kTextMuted);
 }
 
 void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
   const auto screen_w = static_cast<float>(GetScreenWidth());
   const auto screen_h = static_cast<float>(GetScreenHeight());
-  const float scale_x = screen_w / 1920.0f;
-  const float scale_y = screen_h / 1080.0f;
-  const float ui_scale = std::max(1.0f, std::min(scale_x, scale_y));
-
-  const float dock_h = std::max(kDockBaseH, kDockBaseH * ui_scale);
+  const float rem = root_rem(screen_h);
+  const float dock_h = 3.8f * rem;
   const float dock_y = screen_h - dock_h;
-  const int font_sz = scaled_font_size(32, ui_scale);
+  const int font_sz = static_cast<int>(rem);
   const int text_y = static_cast<int>(dock_y + (dock_h - static_cast<float>(font_sz)) * 0.5f);
+  const int pad = static_cast<int>(1.3f * rem);
 
   DrawRectangle(0, static_cast<int>(dock_y), static_cast<int>(screen_w), static_cast<int>(dock_h),
                 Color{14, 16, 19, 255});
@@ -412,23 +448,23 @@ void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
     (frame.lap1_s > 0.0f && frame.lap2_s > 0.0f) ? (frame.lap2_s - frame.lap1_s) : 0.0f;
   (void)std::snprintf(text_buf.data(), text_buf.size(), "R1: %.2fs  R2: %.2fs  Δt: %+.2fs",
                       frame.lap1_s, frame.lap2_s, delta_t);
-  draw_text_bold(text_buf.data(), 24, text_y, font_sz, kZincWhite);
+  draw_text_bold(text_buf.data(), pad, text_y, font_sz, kZincWhite);
 
   // 2. Motor PWM Meters: Nhãn rõ ràng, hiển thị phần trăm và thanh bar
   const int duty_base_x = static_cast<int>(screen_w * 0.28f);
   draw_text_bold("MOTOR:", duty_base_x, text_y, font_sz, kTextMuted);
 
-  const auto draw_motor_bar = [font_sz, ui_scale](int x, int y, const char* label, float duty) {
+  const auto draw_motor_bar = [font_sz, rem](int x, int y, const char* label, float duty) {
     draw_text_bold(label, x, y, font_sz, kZincWhite);
     std::array<char, 16> pct_buf{};
     const int pct = static_cast<int>(duty * 100.0f);
     (void)std::snprintf(pct_buf.data(), pct_buf.size(), "%+3d%%", pct);
-    const int pct_x = x + static_cast<int>(24.0f * ui_scale);
+    const int pct_x = x + static_cast<int>(1.3f * rem);
     draw_text_bold(pct_buf.data(), pct_x, y, font_sz, kTextPrimary);
 
-    const int meter_w = static_cast<int>(70.0f * ui_scale);
-    const int meter_h = static_cast<int>(18.0f * ui_scale);
-    const int bx = pct_x + static_cast<int>(90.0f * ui_scale);
+    const int meter_w = static_cast<int>(3.9f * rem);
+    const int meter_h = static_cast<int>(1.0f * rem);
+    const int bx = pct_x + static_cast<int>(5.0f * rem);
     const int by =
       y + static_cast<int>((static_cast<float>(font_sz) - static_cast<float>(meter_h)) * 0.5f);
 
@@ -443,8 +479,8 @@ void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
     }
   };
 
-  const int bar_offset_l = static_cast<int>(140.0f * ui_scale);
-  const int bar_offset_r = static_cast<int>(340.0f * ui_scale);
+  const int bar_offset_l = static_cast<int>(7.8f * rem);
+  const int bar_offset_r = static_cast<int>(18.9f * rem);
   draw_motor_bar(duty_base_x + bar_offset_l, text_y, "L", frame.left_duty);
   draw_motor_bar(duty_base_x + bar_offset_r, text_y, "R", frame.right_duty);
 
@@ -453,7 +489,7 @@ void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
   (void)std::snprintf(text_buf.data(), text_buf.size(), "Offset: %+.2f", frame.line_offset);
   draw_text_bold(text_buf.data(), status_x, text_y, font_sz, kTextPrimary);
 
-  const int badge_x = status_x + static_cast<int>(200.0f * ui_scale);
+  const int badge_x = status_x + static_cast<int>(11.1f * rem);
   if (frame.dq) {
     if (frame.dq_reason != nullptr) {
       (void)std::snprintf(text_buf.data(), text_buf.size(), "[ DQ: %s ]", frame.dq_reason);
@@ -485,7 +521,7 @@ void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
     status_col = kTextMuted;
   }
   const int status_w = MeasureText(status_buf.data(), font_sz);
-  const int info_x = static_cast<int>(screen_w) - status_w - 24;
+  const int info_x = static_cast<int>(screen_w) - status_w - pad;
   draw_text_bold(status_buf.data(), info_x, text_y, font_sz, status_col);
 }
 

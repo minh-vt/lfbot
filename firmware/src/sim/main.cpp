@@ -9,6 +9,7 @@
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
 #include "renderer.hpp"
+#include "speed_limit_calibration.hpp"
 #include "track_asset.hpp"
 #include "track_rules.hpp"
 #include "world_physics.hpp"
@@ -38,20 +39,16 @@ bool load_tuning_config(const char* path, lf::drive::Tuning& tuning) {
     nlohmann::json doc = nlohmann::json::parse(file);
     if (doc.contains("robot")) {
       const auto& r = doc.at("robot");
-      tuning.robot.steer_kp = r.value("steer_kp", tuning.robot.steer_kp);
-      tuning.robot.steer_kd = r.value("steer_kd", tuning.robot.steer_kd);
-      tuning.robot.d_filter_alpha = r.value("d_filter_alpha", tuning.robot.d_filter_alpha);
-      tuning.robot.corner_limit = r.value("corner_limit", tuning.robot.corner_limit);
-      tuning.robot.avoid_strength = r.value("avoid_strength", tuning.robot.avoid_strength);
-      tuning.robot.avoid_slowdown = r.value("avoid_slowdown", tuning.robot.avoid_slowdown);
-      tuning.robot.offset_gain = r.value("offset_gain", tuning.robot.offset_gain);
+      tuning.robot.geometry_l = r.value("geometry_l", tuning.robot.geometry_l);
+      tuning.robot.geometry_s = r.value("geometry_s", tuning.robot.geometry_s);
+      tuning.robot.bandwidth = r.value("bandwidth", tuning.robot.bandwidth);
+      tuning.robot.damping = r.value("damping", tuning.robot.damping);
     }
     if (doc.contains("track")) {
       const auto& t = doc.at("track");
-      tuning.track.base_throttle = t.value("base_throttle", tuning.track.base_throttle);
-      tuning.track.sprint_scale = t.value("sprint_scale", tuning.track.sprint_scale);
       tuning.track.brake_limit = t.value("brake_limit", tuning.track.brake_limit);
       tuning.track.obstacle_window = t.value("obstacle_window", tuning.track.obstacle_window);
+      tuning.track.sprint_margin = t.value("sprint_margin", tuning.track.sprint_margin);
     }
     return true;
   } catch (const nlohmann::json::exception&) {
@@ -97,6 +94,7 @@ void advance_run(MissionRun& mission, lf::sim::WorldPhysics& world, lf::sim::Tra
   pt.tick = tick;
   pt.speed_limit = plan.ready ? plan.speed_limit_at(tick) : 1.0f;
   pt.obstacle_side = plan.ready ? plan.obstacle_at(tick) : frame.obstacle_side;
+  pt.line_curve_val = plan.ready ? plan.line_curve_at(tick) : result.path_steer;
   pt.ir_weights = world.ir_weights();
 
   if (mission.mode == lf::drive::RunMode::kRun1) {
@@ -281,6 +279,8 @@ lf::sim::RenderFrame to_render_frame(const MissionRun& mission, const lf::sim::T
   frame.theta = pt.theta;
   frame.v = pt.v;
   frame.path_steer = pt.path_steer;
+  frame.curvature = pt.line_curve_val;
+  frame.speed_limit = pt.speed_limit;
   frame.line_offset = pt.line_offset;
   frame.line_certainty = pt.line_certainty;
   frame.tof_front = pt.tof_front;
@@ -326,6 +326,8 @@ int main() {
 
   drive::Tuning cfg;
   load_tuning_config(kTuningPath, cfg);
+  cfg.robot.speed_limit_table =
+    sim::calibrate_speed_limit(cfg.robot, sim::kMaxWheelSpeedMps * sim::kTicksPerMeter);
 
   drive::DriveState state;
   drive::RacePlan plan;

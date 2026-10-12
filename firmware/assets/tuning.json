@@ -1,17 +1,13 @@
 {
   "robot": {
-    "steer_kp": 3.0,
-    "steer_kd": 0.15,
-    "d_filter_alpha": 0.5,
-    "corner_limit": 0.6,
-    "avoid_strength": 0.4,
-    "avoid_slowdown": 0.7,
-    "offset_gain": 0.5
+    "geometry_l": 6.9,
+    "geometry_s": 2.1,
+    "bandwidth": 12.0,
+    "damping": 0.7
   },
   "track": {
-    "base_throttle": 0.5,
-    "sprint_scale": 1.2,
     "brake_limit": 0.02,
-    "obstacle_window": 20
+    "obstacle_window": 20,
+    "sprint_margin": 0.9
   }
 }

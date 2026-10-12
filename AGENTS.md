@@ -11,7 +11,7 @@ Mã nguồn được phân tách theo mô hình kiến trúc sâu (Deep Modules)
 - **`firmware/src/sim/`**: Môi trường mô phỏng máy tính để bàn (Raylib 2D), nhận diện vạch quang học (8 cảm biến IR) và ToF trên sa bàn 6000×1500 mm (vòng loại) / 10000×1500 mm (chung kết), 1 px = 1 mm.
 - **`firmware/src/esp32/`**: Firmware nhúng chạy trên vi điều khiển ESP32-S3 FreeRTOS (dual-core 240MHz, ADC-DMA, PCNT, MCPWM).
 - **`firmware/test/`**: Bộ kiểm thử tự động không đồ họa (Headless Native Tests).
-- **`.scratch/architecture-redesign/spec.md`**: Spec kiến trúc duy nhất (SSoT) — drive không-thứ-nguyên + adapters (sim, esp32). Ticket triển khai tại `.scratch/architecture-redesign/issues/`.
+- **`docs/ARCHITECTURE.md`**: Spec kiến trúc duy nhất (SSoT) — drive không-thứ-nguyên + adapters (sim, esp32). Quyết định ghi nhận tại `docs/decisions/ADR-*.md`, việc còn dở tại `docs/ROADMAP.md`.
 
 ---
 

@@ -94,6 +94,7 @@ float WorldPhysics::cone_tof(float ox, float oy, float center_angle) const {
 
 void WorldPhysics::sample(lf::drive::Readings& frame, float dt, const TrackAsset& track) {
   frame.dt = dt;
+  frame.heading_rate = w_;  // gyro thật = vận tốc góc (ticket 37)
   frame.enc_l = static_cast<std::int32_t>(wheel_ticks_l_);
   frame.enc_r = static_cast<std::int32_t>(wheel_ticks_r_);
 

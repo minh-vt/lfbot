@@ -55,10 +55,11 @@ void plan_speed_pass(RacePlan& plan, const Tuning& cfg) {
   }
 }
 
-// Racing-line offset (ticket 25, placeholder): bám trong cua → setpoint ngược chiều cong.
-void plan_offset_pass(RacePlan& plan, const Tuning& cfg) {
+// Racing-line offset (ticket 25): cắt trong cua = nửa span (geometry, không gain tay).
+void plan_offset_pass(RacePlan& plan) {
+  constexpr float kRacingLineOffset = 0.0f;  // placeholder ticket 25 tạm tắt
   for (std::size_t i = 0; i < plan.length; ++i) {
-    plan.offset_setpoint[i] = -cfg.robot.offset_gain * plan.line_curve[i];
+    plan.offset_setpoint[i] = -kRacingLineOffset * plan.line_curve[i];
   }
 }
 
@@ -102,7 +103,7 @@ void record(RacePlan& plan, float tick, float steer, float obstacle_side) {
     plan.line_curve[i] = prev_curve;
   }
   // line_curve = geometry thuần (low-pass tín hiệu lái, bỏ nhiễu PD); planned_steer = thô.
-  constexpr float kCurveSmoothing = 0.2f;
+  constexpr float kCurveSmoothing = 0.3f;
   plan.planned_steer[index] = steer;
   plan.obstacle_side[index] = obstacle_side;
   plan.line_curve[index] = kCurveSmoothing * steer + (1.0f - kCurveSmoothing) * prev_curve;
@@ -115,7 +116,7 @@ void plan_speed(RacePlan& plan, const Tuning& cfg) {
   }
   dilate_obstacle_side(plan, cfg);
   plan_speed_pass(plan, cfg);
-  plan_offset_pass(plan, cfg);
+  plan_offset_pass(plan);
   plan.ready = true;
 }
 

@@ -45,19 +45,31 @@ void test_steer() {
   using namespace lf::drive;
   const Tuning cfg;
   DriveState state;
-  state.prev_error = 0.1f;
-  CHECK(near(steer_to_line(0.1f, 0.01f, state, cfg), cfg.robot.steer_kp * 0.1f, 1e-2f));
-  state.prev_error = 0.0f;
-  CHECK(steer_to_line(0.2f, 0.01f, state, cfg) > 0.0f);  // lệch phải → lái dương
+  // heading = 0 → thuần P: lệch phải → lái dương.
+  CHECK(steer_to_line(0.2f, 0.0f, 10.0f, state, cfg) > 0.0f);
+  // Gain-scheduling: cùng error, v nhỏ hơn → |steer| lớn hơn (kp ∝ 1/v²).
+  const float slow = steer_to_line(0.05f, 0.0f, 5.0f, state, cfg);
+  const float fast = steer_to_line(0.05f, 0.0f, 20.0f, state, cfg);
+  CHECK(std::abs(slow) > std::abs(fast));
+  // Damping: heading cùng dấu error → lái mạnh hơn (thêm term ψ).
+  CHECK(steer_to_line(0.01f, 0.005f, 10.0f, state, cfg) >
+        steer_to_line(0.01f, 0.0f, 10.0f, state, cfg));
 }
 
-void test_evasion() {
+void test_avoid() {
   using namespace lf::drive;
   Readings frame;
-  frame.obstacle_side = -1.0f;  // vật cản trái
-  frame.obstacle_danger = 1.0f;
+  frame.line_certainty = 1.0f;
+  frame.dt = 0.01f;
+  frame.obstacle_danger = 1.0f;  // vật cản sát
+  frame.obstacle_side = 0.8f;    // bên phải
+  const DriveState state;
+  const RacePlan plan;
   const Tuning cfg;
-  CHECK(avoid_strength(frame, cfg) > 0.0f);  // rẽ phải
+  // Tick 1: phát hiện → chuyển kBrake. Tick 2: phanh.
+  const auto r1 = step(state, frame, plan, cfg);
+  const auto r2 = step(r1.state, frame, plan, cfg);
+  CHECK(r2.command.brake);  // thấy vật cản gần → phanh trước (ticket 36)
 }
 
 void test_mix() {
@@ -106,7 +118,9 @@ void test_plan_speed() {
   record(plan, 3.0f, 1.0f, 0.0f);
   record(plan, 4.0f, 1.0f, 0.0f);
   Tuning cfg;
-  cfg.robot.corner_limit = 0.6f;
+  cfg.robot.speed_limit_table = SpeedLimitTable{};
+  cfg.robot.speed_limit_table.add(0.0f, 1.0f);
+  cfg.robot.speed_limit_table.add(0.5f, 0.4f);
   cfg.track.brake_limit = 0.2f;
   plan_speed(plan, cfg);
   CHECK(plan.length == 5);
@@ -147,7 +161,7 @@ void test_normalize_tof() {
 int main() {
   test_line_offset();
   test_steer();
-  test_evasion();
+  test_avoid();
   test_mix();
   test_step_run1();
   test_step_finish();

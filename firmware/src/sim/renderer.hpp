@@ -27,6 +27,7 @@ struct TracePoint {
   float elapsed_s = 0.0f;
   float speed_limit = 1.0f;
   float obstacle_side = 0.0f;
+  float line_curve_val = 0.0f;  // κ tại thời điểm này (ticket 32)
   float tick = 0.0f;
   std::array<float, 8> ir_weights{};
 };
@@ -48,6 +49,8 @@ struct RenderFrame {
   float left_duty = 0.0f;
   float right_duty = 0.0f;
   bool brake = false;
+  float curvature = 0.0f;    // κ hiện tại → Predictive Arc + nhãn R (ticket 32)
+  float speed_limit = 1.0f;  // để tô màu arc (phanh vs đủ ga)
 
   // Nhiệm vụ & trọng tài
   int mode = 0;  // lf::drive::RunMode
@@ -92,9 +95,11 @@ private:
   void draw_world(const TrackManifest& manifest, const RenderFrame& frame,
                   const lf::drive::RacePlan& plan, const std::vector<TracePoint>& run1_trace,
                   const std::vector<TracePoint>& run2_trace);
-  static void draw_chassis(float rx, float ry, float theta, float path_steer,
-                           const std::array<float, 8>& ir_weights, float d_front, float d_left,
-                           float d_right);
+  static void draw_chassis(float rx, float ry, float theta, float path_steer, float curvature,
+                           float speed_limit, const std::array<float, 8>& ir_weights, float d_front,
+                           float d_left, float d_right);
+  static void draw_predictive_arc(float rx, float ry, float theta, float curvature,
+                                  float speed_limit);
   static void draw_ghost_chassis(float rx, float ry, float theta);
   static void draw_trail_run1(const std::vector<TracePoint>& trace,
                               const lf::drive::RacePlan& plan);
