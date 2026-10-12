@@ -3,7 +3,7 @@
 
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
-#include "sensing/sensor_model.hpp"
+#include "sensing/normalize.hpp"
 
 namespace {
 
@@ -130,9 +130,14 @@ void test_normalize_ir() {
 
 void test_normalize_tof() {
   lf::drive::Readings frame;
+  // obstacle trái rõ (d_left=100 << d_right=300) → side âm, liên tục (không slam −1).
   lf::sensing::normalize_tof(frame, 300.0f, 300.0f, 100.0f, 300.0f);
   CHECK(frame.obstacle_danger > 0.0f);
-  CHECK(frame.obstacle_side < 0.0f);  // vật cản trái
+  CHECK(near(frame.obstacle_side, -0.5f, 1e-2f));
+  // đối xứng → side = 0 (không biết né bên nào → đi thẳng, danger vẫn giảm ga).
+  lf::sensing::normalize_tof(frame, 300.0f, 100.0f, 100.0f, 100.0f);
+  CHECK(near(frame.obstacle_side, 0.0f, 1e-2f));
+  // ngoài tầm → danger 0, side 0.
   lf::sensing::normalize_tof(frame, 300.0f, 300.0f, 300.0f, 300.0f);
   CHECK(near(frame.obstacle_danger, 0.0f) && near(frame.obstacle_side, 0.0f));
 }

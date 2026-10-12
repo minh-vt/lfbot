@@ -14,7 +14,7 @@
 #include <cstdint>
 
 #include "drive/types.hpp"
-#include "sensing/sensor_model.hpp"
+#include "sensing/normalize.hpp"
 
 namespace lf::esp32 {
 namespace {

@@ -2,8 +2,8 @@
 
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
-#include "race_arbiter.hpp"
 #include "track_asset.hpp"
+#include "track_rules.hpp"
 #include "world_physics.hpp"
 
 namespace {
@@ -12,7 +12,28 @@ constexpr const char* kManifestPath = "assets/track_vongloai.json";
 constexpr float kDt = 0.002f;      // 500Hz
 constexpr int kMaxSteps = 120000;  // 240s
 
+bool verify_verdicts(const lf::sim::Verdict& run1_verdict, float run1_time,
+                     const lf::sim::Verdict& run2_verdict, float run2_time) {
+  if (!run1_verdict.completed) {
+    (void)std::printf("test_sim: FAIL Run1 (%s)\n",
+                      lf::sim::infraction_name(run1_verdict.infraction));
+    return false;
+  }
+  if (!run2_verdict.completed) {
+    (void)std::printf("test_sim: FAIL Run2 (%s)\n",
+                      lf::sim::infraction_name(run2_verdict.infraction));
+    return false;
+  }
+  if (run2_time >= run1_time) {
+    (void)std::printf("test_sim: FAIL Run2 (%.2fs) not faster than Run1 (%.2fs)\n", run2_time,
+                      run1_time);
+    return false;
+  }
+  (void)std::printf("test_sim: ALL PASS\n");
+  return true;
 }
+
+}  // namespace
 
 int main() {
   using namespace lf;
@@ -25,8 +46,8 @@ int main() {
 
   sim::WorldPhysics world;
   world.reset(track.manifest());
-  sim::RaceArbiter arbiter;
-  arbiter.reset(track.manifest());
+  sim::TrackRules rules;
+  rules.reset(track.manifest());
 
   const drive::Tuning cfg;
   drive::DriveState state;
@@ -54,48 +75,39 @@ int main() {
       drive::record(plan, tick, result.path_steer, frame.obstacle_side);
     }
     world.step(result.command, kDt);
-    arbiter.observe(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, kDt);
+    rules.check(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, kDt);
     run_elapsed += kDt;
 
-    if (mode == drive::RunMode::kRun1 && state.finish_latched) {
-      run1_verdict = arbiter.verdict();
-      run1_time = run_elapsed;
+    const auto verdict = rules.verdict();
+    if (verdict.infraction != sim::Infraction::kNone) {
+      if (mode == drive::RunMode::kRun1) {
+        run1_verdict = verdict;
+      } else {
+        run2_verdict = verdict;
+      }
+      break;
+    }
+
+    if (mode == drive::RunMode::kRun1 && verdict.completed) {
+      run1_verdict = verdict;
+      run1_time = verdict.lap_time_s;
       drive::plan_speed(plan, cfg);
       world.reset(track.manifest());
-      arbiter.reset(track.manifest());
+      rules.reset(track.manifest());
       state = {};
       run_elapsed = 0.0f;
       mode = drive::RunMode::kRun2;
-    } else if (mode == drive::RunMode::kRun2 && state.finish_latched) {
-      run2_verdict = arbiter.verdict();
-      run2_time = run_elapsed;
+    } else if (mode == drive::RunMode::kRun2 && verdict.completed) {
+      run2_verdict = verdict;
+      run2_time = verdict.lap_time_s;
       mode = drive::RunMode::kDone;
     }
   }
 
+  const char* v1_status = run1_verdict.completed ? "OK" : "DQ";
+  const char* v2_status = run2_verdict.completed ? "OK" : "DQ";
   (void)std::printf("test_sim: steps=%d  Run1=%.2fs (%s)  Run2=%.2fs (%s)  plan=%zu ticks\n", steps,
-                    run1_time, run1_verdict.completed ? "OK" : "DQ", run2_time,
-                    run2_verdict.completed ? "OK" : "DQ", plan.planned_steer.size());
+                    run1_time, v1_status, run2_time, v2_status, plan.planned_steer.size());
 
-  bool pass = true;
-  if (!run1_verdict.completed) {
-    (void)std::printf("test_sim: FAIL Run1 (infraction=%d)\n",
-                      static_cast<int>(run1_verdict.infraction));
-    pass = false;
-  }
-  if (!run2_verdict.completed) {
-    (void)std::printf("test_sim: FAIL Run2 (infraction=%d)\n",
-                      static_cast<int>(run2_verdict.infraction));
-    pass = false;
-  }
-  if (run1_verdict.completed && run2_verdict.completed && run2_time >= run1_time) {
-    (void)std::printf("test_sim: FAIL Run2 (%.2fs) not faster than Run1 (%.2fs)\n", run2_time,
-                      run1_time);
-    pass = false;
-  }
-
-  if (pass) {
-    (void)std::printf("test_sim: ALL PASS\n");
-  }
-  return pass ? 0 : 1;
+  return verify_verdicts(run1_verdict, run1_time, run2_verdict, run2_time) ? 0 : 1;
 }

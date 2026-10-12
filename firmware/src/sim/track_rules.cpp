@@ -1,12 +1,12 @@
-#include "race_arbiter.hpp"
+#include "track_rules.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 namespace lf::sim {
 
-void RaceArbiter::reset(const TrackManifest& manifest) {
-  manifest_ = manifest;
+void TrackRules::reset(const TrackManifest& manifest) {
+  manifest_ = &manifest;
   elapsed_s_ = 0.0f;
   line_lost_s_ = 0.0f;
   completed_ = false;
@@ -14,20 +14,16 @@ void RaceArbiter::reset(const TrackManifest& manifest) {
   infraction_ = Infraction::kNone;
 }
 
-void RaceArbiter::observe(float x, float y, float v, bool line_detected, float dt) {
-  if (completed_ || infraction_ != Infraction::kNone) {
-    return;  // đã đóng băng
+void TrackRules::check(float x, float y, float v, bool line_detected, float dt) {
+  if (completed_ || infraction_ != Infraction::kNone || manifest_ == nullptr) {
+    return;
   }
   elapsed_s_ += dt;
 
-  if (!line_detected) {
-    line_lost_s_ += dt;
-    if (line_lost_s_ > kLineLostTimeoutS) {
-      infraction_ = Infraction::kLineLostTimeout;
-      return;
-    }
-  } else {
-    line_lost_s_ = 0.0f;
+  line_lost_s_ = line_detected ? 0.0f : line_lost_s_ + dt;
+  if (line_lost_s_ > kLineLostTimeoutS) {
+    infraction_ = Infraction::kLineLostTimeout;
+    return;
   }
 
   if (elapsed_s_ > kTimeLimitS) {
@@ -35,13 +31,13 @@ void RaceArbiter::observe(float x, float y, float v, bool line_detected, float d
     return;
   }
 
-  if (x < kRobotRadiusMm || y < kRobotRadiusMm || x > manifest_.arena_width_mm - kRobotRadiusMm ||
-      y > manifest_.arena_height_mm - kRobotRadiusMm) {
+  if (x < kRobotRadiusMm || y < kRobotRadiusMm || x > manifest_->arena_width_mm - kRobotRadiusMm ||
+      y > manifest_->arena_height_mm - kRobotRadiusMm) {
     infraction_ = Infraction::kOutOfBounds;
     return;
   }
 
-  for (const auto& obstacle : manifest_.obstacles) {
+  for (const auto& obstacle : manifest_->obstacles) {
     const float half_w = obstacle.width_mm * 0.5f;
     const float half_h = obstacle.height_mm * 0.5f;
     const float cx = std::max(obstacle.x_mm - half_w, std::min(x, obstacle.x_mm + half_w));
@@ -54,16 +50,16 @@ void RaceArbiter::observe(float x, float y, float v, bool line_detected, float d
     }
   }
 
-  const bool in_box = (x >= manifest_.finish_min_x && x <= manifest_.finish_max_x &&
-                       y >= manifest_.finish_min_y && y <= manifest_.finish_max_y);
+  const bool in_box = (x >= manifest_->finish_min_x && x <= manifest_->finish_max_x &&
+                       y >= manifest_->finish_min_y && y <= manifest_->finish_max_y);
   if (in_box && std::abs(v) <= kFinishStopSpeedMps) {
     completed_ = true;
     lap_time_s_ = elapsed_s_;
   }
 }
 
-Verdict RaceArbiter::verdict() const {
+Verdict TrackRules::verdict() const {
   return {completed_, lap_time_s_, infraction_};
 }
 
-}
+}  // namespace lf::sim

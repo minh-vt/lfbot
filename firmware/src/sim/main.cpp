@@ -1,17 +1,26 @@
 #include <raylib.h>
 
 #include <algorithm>
+#include <array>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <vector>
 
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
-#include "race_arbiter.hpp"
 #include "renderer.hpp"
 #include "track_asset.hpp"
+#include "track_rules.hpp"
 #include "world_physics.hpp"
 
 namespace {
 
-constexpr const char* kManifestPath = "assets/track_vongloai.json";
+constexpr std::array<const char*, 2> kManifestPaths = {
+  "assets/track_vongloai.json",
+  "assets/track_chungket.json",
+};
+
+constexpr const char* kTuningPath = "assets/tuning.json";
 
 struct MissionRun {
   lf::drive::RunMode mode = lf::drive::RunMode::kIdle;
@@ -20,90 +29,359 @@ struct MissionRun {
   float run2_time = 0.0f;
 };
 
-// Một tick vật lý + điều khiển (Run 1: ghi plan; chạm finish: chuyển mode).
-void advance_run(MissionRun& mission, lf::sim::WorldPhysics& world, lf::sim::RaceArbiter& arbiter,
+bool load_tuning_config(const char* path, lf::drive::Tuning& tuning) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    return false;
+  }
+  try {
+    nlohmann::json doc = nlohmann::json::parse(file);
+    if (doc.contains("robot")) {
+      const auto& r = doc.at("robot");
+      tuning.robot.steer_kp = r.value("steer_kp", tuning.robot.steer_kp);
+      tuning.robot.steer_kd = r.value("steer_kd", tuning.robot.steer_kd);
+      tuning.robot.d_filter_alpha = r.value("d_filter_alpha", tuning.robot.d_filter_alpha);
+      tuning.robot.corner_limit = r.value("corner_limit", tuning.robot.corner_limit);
+      tuning.robot.avoid_strength = r.value("avoid_strength", tuning.robot.avoid_strength);
+      tuning.robot.avoid_slowdown = r.value("avoid_slowdown", tuning.robot.avoid_slowdown);
+      tuning.robot.offset_gain = r.value("offset_gain", tuning.robot.offset_gain);
+    }
+    if (doc.contains("track")) {
+      const auto& t = doc.at("track");
+      tuning.track.base_throttle = t.value("base_throttle", tuning.track.base_throttle);
+      tuning.track.sprint_scale = t.value("sprint_scale", tuning.track.sprint_scale);
+      tuning.track.brake_limit = t.value("brake_limit", tuning.track.brake_limit);
+      tuning.track.obstacle_window = t.value("obstacle_window", tuning.track.obstacle_window);
+    }
+    return true;
+  } catch (const nlohmann::json::exception&) {
+    return false;
+  }
+}
+
+// Một tick vật lý + điều khiển (TrackRules phán quyết hoàn thành / vi phạm).
+void advance_run(MissionRun& mission, lf::sim::WorldPhysics& world, lf::sim::TrackRules& rules,
                  const lf::sim::TrackAsset& track, lf::drive::DriveState& state,
-                 lf::drive::RacePlan& plan, const lf::drive::Tuning& cfg, float dt) {
+                 lf::drive::RacePlan& plan, const lf::drive::Tuning& cfg,
+                 std::vector<lf::sim::TracePoint>& run1_trace,
+                 std::vector<lf::sim::TracePoint>& run2_trace, float dt) {
   mission.elapsed += dt;
 
   lf::drive::Readings frame;
   world.sample(frame, dt, track);
   const auto result = lf::drive::step(state, frame, plan, cfg);
   state = result.state;
+
+  const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
   if (mission.mode == lf::drive::RunMode::kRun1) {
-    const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
     lf::drive::record(plan, tick, result.path_steer, frame.obstacle_side);
   }
   world.step(result.command, dt);
-  arbiter.observe(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, dt);
+  rules.check(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, dt);
 
-  if (mission.mode == lf::drive::RunMode::kRun1 && state.finish_latched) {
-    mission.run1_time = mission.elapsed;
+  // Thu thập trace point
+  lf::sim::TracePoint pt;
+  pt.x = world.x();
+  pt.y = world.y();
+  pt.theta = world.theta();
+  pt.v = world.v();
+  pt.line_offset = frame.line_offset;
+  pt.line_certainty = frame.line_certainty;
+  pt.path_steer = result.path_steer;
+  pt.left_duty = result.command.left_duty;
+  pt.right_duty = result.command.right_duty;
+  pt.tof_front = world.tof_front();
+  pt.tof_left = world.tof_left();
+  pt.tof_right = world.tof_right();
+  pt.elapsed_s = mission.elapsed;
+  pt.tick = tick;
+  pt.speed_limit = plan.ready ? plan.speed_limit_at(tick) : 1.0f;
+  pt.obstacle_side = plan.ready ? plan.obstacle_at(tick) : frame.obstacle_side;
+  pt.ir_weights = world.ir_weights();
+
+  if (mission.mode == lf::drive::RunMode::kRun1) {
+    run1_trace.push_back(pt);
+  } else if (mission.mode == lf::drive::RunMode::kRun2) {
+    run2_trace.push_back(pt);
+  }
+
+  // Khi va chạm hoặc vi phạm: dừng ngay lập tức, giữ nguyên hiện trường
+  const auto verdict = rules.verdict();
+  if (verdict.infraction != lf::sim::Infraction::kNone) {
+    mission.mode = lf::drive::RunMode::kDone;
+    return;
+  }
+
+  // Kết thúc Run 1 hoặc Run 2 khi TrackRules công nhận hoàn thành (xe dừng trong đích)
+  if (mission.mode == lf::drive::RunMode::kRun1 && verdict.completed) {
+    mission.run1_time = verdict.lap_time_s;
     lf::drive::plan_speed(plan, cfg);
+
+    for (auto& trace_pt : run1_trace) {
+      trace_pt.speed_limit = plan.speed_limit_at(trace_pt.tick);
+      trace_pt.obstacle_side = plan.obstacle_at(trace_pt.tick);
+    }
+
     world.reset(track.manifest());
-    arbiter.reset(track.manifest());
+    rules.reset(track.manifest());
     state = {};
     mission.elapsed = 0.0f;
     mission.mode = lf::drive::RunMode::kRun2;
-  } else if (mission.mode == lf::drive::RunMode::kRun2 && state.finish_latched) {
-    mission.run2_time = mission.elapsed;
+  } else if (mission.mode == lf::drive::RunMode::kRun2 && verdict.completed) {
+    mission.run2_time = verdict.lap_time_s;
     mission.mode = lf::drive::RunMode::kDone;
   }
 }
 
+const std::vector<lf::sim::TracePoint>* get_active_trace(
+  const MissionRun& mission, const std::vector<lf::sim::TracePoint>& run1_trace,
+  const std::vector<lf::sim::TracePoint>& run2_trace) {
+  if (mission.mode == lf::drive::RunMode::kRun2) {
+    return &run2_trace;
+  }
+  if (mission.mode == lf::drive::RunMode::kDone && !run2_trace.empty()) {
+    return &run2_trace;
+  }
+  return &run1_trace;
 }
+
+void reset_simulation(lf::sim::WorldPhysics& world, lf::sim::TrackRules& rules,
+                      const lf::sim::TrackAsset& track, lf::drive::DriveState& state,
+                      lf::drive::RacePlan& plan, MissionRun& mission,
+                      std::vector<lf::sim::TracePoint>& run1_trace,
+                      std::vector<lf::sim::TracePoint>& run2_trace, bool& paused,
+                      int& scrub_frame) {
+  world.reset(track.manifest());
+  rules.reset(track.manifest());
+  state = {};
+  plan.reset();
+  mission = {};
+  run1_trace.clear();
+  run2_trace.clear();
+  paused = false;
+  scrub_frame = -1;
+}
+
+void handle_scrub_input(const std::vector<lf::sim::TracePoint>& trace, bool& paused,
+                        int& scrub_frame) {
+  const bool step_back = IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT);
+  const bool step_fwd = IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT);
+  if ((!step_back && !step_fwd) || trace.empty()) {
+    return;
+  }
+
+  paused = true;
+  const int step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 10 : 1;
+  const int max_frame = static_cast<int>(trace.size()) - 1;
+
+  if (scrub_frame < 0) {
+    scrub_frame = max_frame;
+  }
+  if (step_back) {
+    scrub_frame = std::max(0, scrub_frame - step);
+  }
+  if (step_fwd) {
+    scrub_frame = std::min(max_frame, scrub_frame + step);
+  }
+}
+
+void handle_playback_speed(float& playback_speed) {
+  if (IsKeyPressed(KEY_COMMA)) {
+    if (playback_speed > 0.5f) {
+      playback_speed = 0.5f;
+    } else if (playback_speed > 0.25f) {
+      playback_speed = 0.25f;
+    }
+  }
+  if (IsKeyPressed(KEY_PERIOD)) {
+    if (playback_speed < 1.0f) {
+      playback_speed = 1.0f;
+    } else if (playback_speed < 2.0f) {
+      playback_speed = 2.0f;
+    }
+  }
+}
+
+void poll_keyboard_input(std::size_t& track_idx, lf::sim::TrackAsset& track,
+                         lf::sim::WorldPhysics& world, lf::sim::TrackRules& rules,
+                         lf::drive::DriveState& state, lf::drive::RacePlan& plan,
+                         MissionRun& mission, std::vector<lf::sim::TracePoint>& run1_trace,
+                         std::vector<lf::sim::TracePoint>& run2_trace, lf::sim::Renderer& renderer,
+                         bool& paused, float& playback_speed, int& scrub_frame) {
+  if (IsKeyPressed(KEY_TAB)) {
+    track_idx = (track_idx + 1) % kManifestPaths.size();
+    if (track.load(kManifestPaths[track_idx])) {
+      reset_simulation(world, rules, track, state, plan, mission, run1_trace, run2_trace, paused,
+                       scrub_frame);
+      renderer.reload_track(track.manifest());
+    }
+  }
+
+  if (IsKeyPressed(KEY_R)) {
+    reset_simulation(world, rules, track, state, plan, mission, run1_trace, run2_trace, paused,
+                     scrub_frame);
+  }
+
+  if (IsKeyPressed(KEY_C)) {
+    renderer.toggle_camera_mode();
+  }
+
+  if (IsKeyPressed(KEY_F11) || IsKeyPressed(KEY_F)) {
+    ToggleFullscreen();
+  }
+
+  if (IsKeyPressed(KEY_SPACE)) {
+    if (scrub_frame >= 0) {
+      scrub_frame = -1;
+      paused = false;
+    } else if (mission.mode == lf::drive::RunMode::kIdle) {
+      mission.mode = lf::drive::RunMode::kRun1;
+      paused = false;
+    } else {
+      paused = !paused;
+    }
+  }
+
+  if (IsKeyPressed(KEY_ONE)) {
+    mission.mode = lf::drive::RunMode::kRun1;
+    paused = false;
+    scrub_frame = -1;
+  }
+  if (IsKeyPressed(KEY_TWO)) {
+    mission.mode = lf::drive::RunMode::kRun2;
+    paused = false;
+    scrub_frame = -1;
+  }
+
+  const auto* active_trace = get_active_trace(mission, run1_trace, run2_trace);
+  handle_scrub_input(*active_trace, paused, scrub_frame);
+  handle_playback_speed(playback_speed);
+}
+
+lf::sim::RenderFrame to_render_frame(const MissionRun& mission, const lf::sim::TrackRules& rules,
+                                     const lf::sim::TracePoint& pt, bool paused,
+                                     float playback_speed, int scrub_frame, int total_frames) {
+  lf::sim::RenderFrame frame;
+  frame.mode = static_cast<int>(mission.mode);
+  frame.lap1_s = mission.run1_time;
+  frame.lap2_s = mission.run2_time;
+
+  const auto verdict = rules.verdict();
+  frame.dq = (verdict.infraction != lf::sim::Infraction::kNone);
+  frame.dq_reason = (verdict.infraction != lf::sim::Infraction::kNone)
+                      ? lf::sim::infraction_name(verdict.infraction)
+                      : nullptr;
+  frame.paused = paused;
+  frame.playback_speed = playback_speed;
+  frame.scrub_frame = scrub_frame;
+  frame.total_frames = total_frames;
+
+  frame.x = pt.x;
+  frame.y = pt.y;
+  frame.theta = pt.theta;
+  frame.v = pt.v;
+  frame.path_steer = pt.path_steer;
+  frame.line_offset = pt.line_offset;
+  frame.line_certainty = pt.line_certainty;
+  frame.tof_front = pt.tof_front;
+  frame.tof_left = pt.tof_left;
+  frame.tof_right = pt.tof_right;
+  frame.ir_weights = pt.ir_weights;
+  frame.left_duty = pt.left_duty;
+  frame.right_duty = pt.right_duty;
+  frame.elapsed_s = pt.elapsed_s;
+  return frame;
+}
+
+lf::sim::TracePoint make_live_trace_point(const lf::sim::WorldPhysics& world, float elapsed) {
+  lf::sim::TracePoint pt;
+  pt.x = world.x();
+  pt.y = world.y();
+  pt.theta = world.theta();
+  pt.v = world.v();
+  pt.tof_front = world.tof_front();
+  pt.tof_left = world.tof_left();
+  pt.tof_right = world.tof_right();
+  pt.ir_weights = world.ir_weights();
+  pt.elapsed_s = elapsed;
+  return pt;
+}
+
+}  // namespace
 
 int main() {
   using namespace lf;
 
+  std::size_t track_idx = 0;
   sim::TrackAsset track;
-  if (!track.load(kManifestPath)) {
-    TraceLog(LOG_ERROR, "Cannot load track: %s", kManifestPath);
+  if (!track.load(kManifestPaths[track_idx])) {
+    TraceLog(LOG_ERROR, "Cannot load track: %s", kManifestPaths[track_idx]);
     return 1;
   }
 
   sim::WorldPhysics world;
   world.reset(track.manifest());
-  sim::RaceArbiter arbiter;
-  arbiter.reset(track.manifest());
+  sim::TrackRules rules;
+  rules.reset(track.manifest());
 
-  const drive::Tuning cfg;
+  drive::Tuning cfg;
+  load_tuning_config(kTuningPath, cfg);
+
   drive::DriveState state;
   drive::RacePlan plan;
   MissionRun mission;
+
+  std::vector<sim::TracePoint> run1_trace;
+  std::vector<sim::TracePoint> run2_trace;
+  run1_trace.reserve(20000);
+  run2_trace.reserve(20000);
+
+  bool paused = false;
+  float playback_speed = 1.0f;
+  int scrub_frame = -1;
 
   sim::Renderer renderer;
   renderer.init(track.manifest());
 
   while (!sim::Renderer::should_close()) {
-    const float dt = std::min(GetFrameTime(), 0.01f);
+    const float raw_dt = std::min(GetFrameTime(), 0.02f);
+    const float dt = raw_dt * playback_speed;
 
-    if (IsKeyPressed(KEY_R)) {
-      world.reset(track.manifest());
-      arbiter.reset(track.manifest());
-      state = {};
-      plan.reset();
-      mission = {};
-    }
-    if (IsKeyPressed(KEY_SPACE) && mission.mode == drive::RunMode::kIdle) {
-      mission.mode = drive::RunMode::kRun1;
-    }
-    if (IsKeyPressed(KEY_ONE)) {
-      mission.mode = drive::RunMode::kRun1;
-    }
-    if (IsKeyPressed(KEY_TWO)) {
-      mission.mode = drive::RunMode::kRun2;
+    if (IsKeyPressed(KEY_U)) {
+      load_tuning_config(kTuningPath, cfg);
     }
 
-    if (mission.mode == drive::RunMode::kRun1 || mission.mode == drive::RunMode::kRun2) {
-      advance_run(mission, world, arbiter, track, state, plan, cfg, dt);
+    poll_keyboard_input(track_idx, track, world, rules, state, plan, mission, run1_trace,
+                        run2_trace, renderer, paused, playback_speed, scrub_frame);
+
+    // Xử lý bước vật lý khi không pause, chưa xong và không đang tua frame
+    if (!paused && scrub_frame < 0 &&
+        (mission.mode == drive::RunMode::kRun1 || mission.mode == drive::RunMode::kRun2)) {
+      advance_run(mission, world, rules, track, state, plan, cfg, run1_trace, run2_trace, dt);
     }
 
-    const sim::Verdict verdict = arbiter.verdict();
+    const auto& active_trace = *get_active_trace(mission, run1_trace, run2_trace);
+    const int total_frames = static_cast<int>(active_trace.size());
+    sim::TracePoint display_pt;
+    if (scrub_frame >= 0 && !active_trace.empty()) {
+      const auto idx = static_cast<std::size_t>(std::clamp(scrub_frame, 0, total_frames - 1));
+      display_pt = active_trace[idx];
+    } else if (!active_trace.empty()) {
+      display_pt = active_trace.back();
+    } else {
+      display_pt = make_live_trace_point(world, mission.elapsed);
+    }
+
+    const sim::RenderFrame r_frame = to_render_frame(mission, rules, display_pt, paused,
+                                                     playback_speed, scrub_frame, total_frames);
+
+    // Cập nhật camera
+    renderer.update_camera(r_frame.x, r_frame.y, r_frame.theta, r_frame.v, raw_dt,
+                           track.manifest());
+
+    // Vẽ frame
     sim::Renderer::begin_frame();
-    renderer.draw(track.manifest(), world.x(), world.y(), world.theta(),
-                  static_cast<int>(mission.mode), mission.elapsed, world.v(), mission.run1_time,
-                  mission.run2_time, verdict.infraction != sim::Infraction::kNone);
+    renderer.draw(track.manifest(), r_frame, plan, run1_trace, run2_trace);
     sim::Renderer::end_frame();
   }
 

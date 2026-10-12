@@ -18,6 +18,9 @@ inline constexpr float kIrHalfSpanMm = kIrOffsetsMm.back();
 // Tầm ToF hữu dụng (mm): ngưỡng danger + tầm raycast sim + fallback esp32.
 inline constexpr float kTofRangeMm = 300.0f;
 
+// Full-scale ADC 12-bit (2^12 − 1): vạch tối → ADC thấp.
+inline constexpr float kAdcFullScale = 4095.0f;
+
 // Chuẩn hóa thuần (test được trên native, không phụ thuộc IDF).
 // Giả định phân cực IR: vạch tối → ADC thấp → "darkness" cao.
 struct IrReadings {
@@ -30,11 +33,10 @@ struct IrResult {
 };
 
 inline IrResult normalize_ir(const IrReadings& readings) {
-  constexpr float kAdcMax = 4095.0f;
   float weight_sum = 0.0f;
   float weighted_pos = 0.0f;
   for (std::size_t i = 0; i < kIrOffsetsMm.size(); ++i) {
-    const float weight = (kAdcMax - static_cast<float>(readings.raw[i])) / kAdcMax;
+    const float weight = (kAdcFullScale - static_cast<float>(readings.raw[i])) / kAdcFullScale;
     weight_sum += weight;
     weighted_pos += weight * kIrOffsetsMm[i];
   }
@@ -47,7 +49,7 @@ inline IrResult normalize_ir(const IrReadings& readings) {
   return result;
 }
 
-// Chuẩn hóa 3 tia ToF (front, trái, phải) → obstacle_danger/obstacle_side của frame.
+// Chuẩn hóa 3 tia ToF (front, trái, phải) → obstacle_danger/obstacle_side liên tục.
 inline void normalize_tof(lf::drive::Readings& frame, float range_mm, float d_front_mm,
                           float d_left_mm, float d_right_mm) {
   const float d_min = std::min({d_front_mm, d_left_mm, d_right_mm});
@@ -57,11 +59,10 @@ inline void normalize_tof(lf::drive::Readings& frame, float range_mm, float d_fr
     return;
   }
   frame.obstacle_danger = std::clamp(1.0f - d_min / range_mm, 0.0f, 1.0f);
-  if (d_left_mm < d_right_mm) {
-    frame.obstacle_side = -1.0f;
-  } else if (d_right_mm < d_left_mm) {
-    frame.obstacle_side = 1.0f;
-  }
+  // Hướng lệch liên tục: chênh lệch trái/phải chuẩn hóa theo tổng (không if/else ±1).
+  // obstacle trái (d_left < d_right) → âm; phải → dương; chính diện → 0.
+  const float side = (d_left_mm - d_right_mm) / std::max(d_left_mm + d_right_mm, 1e-3f);
+  frame.obstacle_side = std::clamp(side, -1.0f, 1.0f);
 }
 
 }
