@@ -68,10 +68,6 @@ void plan_offset_pass(RacePlan& plan) {
 // Truy cập plan trả giá trị TRUNG TÍNH khi chưa ready (đang ghi hoặc chưa plan):
 // feedforward/setpoint/obstacle → 0; speed_limit → 1 (không chặn). Nhờ vậy step()
 // không cần rẽ nhánh `plan.ready` cho setpoint/feedforward.
-float RacePlan::planned_steer_at(float tick) const {
-  return ready ? interp(planned_steer.data(), length, tick) : 0.0f;
-}
-
 float RacePlan::line_curve_at(float tick) const {
   return ready ? interp(line_curve.data(), length, tick) : 0.0f;
 }
@@ -97,17 +93,14 @@ void record(RacePlan& plan, float tick, float steer, float obstacle_side) {
     return;  // vượt dung lượng (không xảy ra với sa bàn ≤ 41m)
   }
   // Điền khoảng trống bằng giá trị trước đó.
-  const float prev_steer = (plan.length > 0) ? plan.planned_steer[plan.length - 1] : 0.0f;
   const float prev_side = (plan.length > 0) ? plan.obstacle_side[plan.length - 1] : 0.0f;
   const float prev_curve = (plan.length > 0) ? plan.line_curve[plan.length - 1] : 0.0f;
   for (std::size_t i = plan.length; i < index; ++i) {
-    plan.planned_steer[i] = prev_steer;
     plan.obstacle_side[i] = prev_side;
     plan.line_curve[i] = prev_curve;
   }
-  // line_curve = geometry thuần (low-pass tín hiệu lái, bỏ nhiễu PD); planned_steer = thô.
+  // line_curve = geometry thuần (low-pass tín hiệu lái, bỏ nhiễu PD).
   constexpr float kCurveSmoothing = 0.3f;
-  plan.planned_steer[index] = steer;
   plan.obstacle_side[index] = obstacle_side;
   plan.line_curve[index] = kCurveSmoothing * steer + (1.0f - kCurveSmoothing) * prev_curve;
   plan.length = std::max(plan.length, index + 1);

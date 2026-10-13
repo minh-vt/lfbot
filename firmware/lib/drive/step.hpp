@@ -7,7 +7,8 @@ namespace lf::drive {
 struct StepResult {
   DriveCommand command;
   DriveState state;
-  float path_steer = 0.0f;  // planned_steer + steer_to_line(e): lái theo vạch (không né vật cản)
+  float path_steer =
+    0.0f;  // line_curve feedforward + steer_to_line(e): lái theo vạch (không né vật cản)
 };
 
 // IR giữa các stage của pipeline điều khiển (mỗi tick).
@@ -36,7 +37,7 @@ MotionEstimate estimate_motion(const Readings& f, const DriveState& s, const Tun
 LineBelief estimate_line(const Readings& f, DriveState& next, const RacePlan& plan, float tick,
                          float dt, const Tuning& cfg);
 float fuse_line_offset(const Readings& f, DriveState& s);
-float steer_to_line(float error, float heading, float v_tick, DriveState& s, const Tuning& cfg);
+float steer_to_line(float error, float heading, float v_tick, const Tuning& cfg);
 // Trường thế liên tục: trộn lái bám line (hút) với lái né vật cản (đẩy) theo danger.
 FieldOut apply_field(float path_steer, const Readings& f, DriveState& s);
 float choose_speed(float tick, float error, float steer, const Readings& f, const RacePlan& plan,

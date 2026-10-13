@@ -114,7 +114,7 @@ int main() {
   const char* v1_status = run1_verdict.completed ? "OK" : "DQ";
   const char* v2_status = run2_verdict.completed ? "OK" : "DQ";
   (void)std::printf("test_sim: steps=%d  Run1=%.2fs (%s)  Run2=%.2fs (%s)  plan=%zu ticks\n", steps,
-                    run1_time, v1_status, run2_time, v2_status, plan.planned_steer.size());
+                    run1_time, v1_status, run2_time, v2_status, plan.length);
 
   return verify_verdicts(run1_verdict, run1_time, run2_verdict, run2_time) ? 0 : 1;
 }

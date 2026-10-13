@@ -30,10 +30,9 @@ float certainty_weight(float certainty) {
 }
 
 // ψ ước lượng = đạo hàm lệch ngang theo quãng đường (de/ds ≈ ψ), lọc theo bandwidth.
-// gyro (f.heading_rate) KHÔNG dùng trực tiếp: ω là yaw tuyệt đối, không quy chiếu về
-// tiếp tuyến line khi chưa biết κ → sẽ thành positive feedback. Gyro dành cho slip
-// detection + calibration (ticket 34).
-float estimate_heading(const Readings& /*f*/, DriveState& s, const Tuning& cfg, float dt) {
+// KHÔNG tích gyro: ω là yaw tuyệt đối, không quy chiếu về tiếp tuyến line khi chưa biết κ
+// → positive feedback. Gyro dành cho slip detection + calibration (ticket 34).
+float estimate_heading(DriveState& s, const Tuning& cfg, float dt) {
   const float v = std::max(s.speed, kMinSpeed);
   const float offset_rate = (s.line_estimate - s.prev_line_estimate) / std::max(dt, 1e-4f);
   const float psi_offset = cfg.robot.geometry_s * offset_rate / v;
@@ -70,7 +69,7 @@ LineBelief estimate_line(const Readings& frame, DriveState& next, const RacePlan
   const float estimate = fuse_line_offset(frame, next);
   // plan chưa ready → offset_at trả 0 (không cần rẽ nhánh).
   belief.offset = belief.certainty * (estimate - plan.offset_at(tick));
-  belief.heading = estimate_heading(frame, next, cfg, dt);
+  belief.heading = estimate_heading(next, cfg, dt);
   return belief;
 }
 
@@ -104,8 +103,7 @@ float fuse_line_offset(const Readings& frame, DriveState& state) {
 // Pole-placement ζ cố định (ticket 33): plant ë = (v²/(L·s))·u → kp/kd schedule theo v.
 //   kp    = ωn²·L·s / v²
 //   k_psi = 2·ζ·ωn·L / v        (damping theo heading ψ thay vì đạo hàm offset)
-float steer_to_line(float error, float heading, float v_tick, DriveState& /*state*/,
-                    const Tuning& cfg) {
+float steer_to_line(float error, float heading, float v_tick, const Tuning& cfg) {
   const float v = std::max(v_tick, kMinSpeed);
   const float omega2 = cfg.robot.bandwidth * cfg.robot.bandwidth;
   const float ls = cfg.robot.geometry_l * cfg.robot.geometry_s;
@@ -165,7 +163,7 @@ StepResult step(const DriveState& state, const Readings& frame, const RacePlan& 
   const float feedback_gain = plan.ready ? kRun2FeedbackGain : 1.0f;
   const float path_steer =
     plan.line_curve_at(motion.tick) +
-    feedback_gain * steer_to_line(belief.offset, belief.heading, next.speed, next, cfg);
+    feedback_gain * steer_to_line(belief.offset, belief.heading, next.speed, cfg);
 
   // Stage 4 — trường thế né vật cản (trộn liên tục theo danger).
   const FieldOut field = apply_field(path_steer, frame, next);

@@ -45,16 +45,14 @@ void test_line_offset() {
 void test_steer() {
   using namespace lf::drive;
   const Tuning cfg;
-  DriveState state;
   // heading = 0 → thuần P: lệch phải → lái dương.
-  CHECK(steer_to_line(0.2f, 0.0f, 10.0f, state, cfg) > 0.0f);
+  CHECK(steer_to_line(0.2f, 0.0f, 10.0f, cfg) > 0.0f);
   // Gain-scheduling: cùng error, v nhỏ hơn → |steer| lớn hơn (kp ∝ 1/v²).
-  const float slow = steer_to_line(0.05f, 0.0f, 5.0f, state, cfg);
-  const float fast = steer_to_line(0.05f, 0.0f, 20.0f, state, cfg);
+  const float slow = steer_to_line(0.05f, 0.0f, 5.0f, cfg);
+  const float fast = steer_to_line(0.05f, 0.0f, 20.0f, cfg);
   CHECK(std::abs(slow) > std::abs(fast));
   // Damping: heading cùng dấu error → lái mạnh hơn (thêm term ψ).
-  CHECK(steer_to_line(0.01f, 0.005f, 10.0f, state, cfg) >
-        steer_to_line(0.01f, 0.0f, 10.0f, state, cfg));
+  CHECK(steer_to_line(0.01f, 0.005f, 10.0f, cfg) > steer_to_line(0.01f, 0.0f, 10.0f, cfg));
 }
 
 void test_avoid() {

@@ -15,7 +15,6 @@ enum class RunMode : std::uint8_t { kIdle = 0, kRun1 = 1, kRun2 = 2, kDone = 3 }
 struct Readings {
   float line_offset = 0.0f;      // [-1, 1]: lệch vạch chuẩn hóa (dương = vạch bên phải)
   float line_certainty = 0.0f;   // [0, 1]: độ tin cậy vạch (liên tục, không phải bool)
-  float heading_rate = 0.0f;     // [rad/s] gyro; 0 = không có IMU → fallback de/ds (ticket 37)
   bool finish_detected = false;  // cảm biến vạch đích
   float obstacle_danger = 0.0f;  // [0, 1]
   float obstacle_side = 0.0f;    // [-1, 1]: âm = vật cản bên trái
@@ -48,7 +47,6 @@ inline constexpr std::size_t kMaxPlanTicks = 4096;
 
 // Cầu nối 1-D Run1 → Run2. Fixed-capacity: không cấp phát động trong vòng 500Hz.
 struct RacePlan {
-  std::array<float, kMaxPlanTicks> planned_steer{};    // ghi Run 1 (tín hiệu lái đã thực thi)
   std::array<float, kMaxPlanTicks> line_curve{};       // ghi Run 1: độ cong thuần (geometry)
   std::array<float, kMaxPlanTicks> obstacle_side{};    // ghi Run 1 (±1), giãn khi plan_speed
   std::array<float, kMaxPlanTicks> speed_limit{};      // plan_speed sau Run 1 (backward-pass)
@@ -60,7 +58,6 @@ struct RacePlan {
     length = 0;
     ready = false;
   }
-  [[nodiscard]] float planned_steer_at(float tick) const;
   [[nodiscard]] float line_curve_at(float tick) const;
   [[nodiscard]] float obstacle_at(float tick) const;
   [[nodiscard]] float speed_limit_at(float tick) const;
