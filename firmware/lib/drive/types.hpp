@@ -11,9 +11,6 @@ namespace lf::drive {
 // Chế độ nhiệm vụ (dùng chung sim + esp32).
 enum class RunMode : std::uint8_t { kIdle = 0, kRun1 = 1, kRun2 = 2, kDone = 3 };
 
-// Pha né vật cản (ticket 36): phanh → cam kết bên → vòng → bám lại line.
-enum class AvoidPhase : std::uint8_t { kIdle = 0, kBrake, kCommit, kRejoin };
-
 // Đọc cảm biến không-thứ-nguyên mỗi tick.
 struct Readings {
   float line_offset = 0.0f;      // [-1, 1]: lệch vạch chuẩn hóa (dương = vạch bên phải)
@@ -43,8 +40,7 @@ struct DriveState {
   float prev_tick = 0.0f;           // mốc quãng đường tick trước
   float run1_speed = 0.0f;          // error-budget speed Run 1 (ticket 35)
   bool finish_latched = false;
-  AvoidPhase avoid = AvoidPhase::kIdle;  // state machine né (ticket 36)
-  float avoid_side = 0.0f;               // ±1: bên đã cam kết
+  float avoid_side = 0.0f;  // [-1,1]: bộ nhớ rò hướng lái né vật cản (ticket 03)
 };
 
 // Dung lượng tối đa của plan: 4096 tick × 20mm = 81.9m (thừa cho sa bàn ≤ 41m).

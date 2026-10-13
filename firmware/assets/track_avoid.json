@@ -1,0 +1,26 @@
+{
+  "name": "Avoidance Test (Lane A)",
+  "image": "assets/track_vongloai.png",
+  "arena_width": 6000.0,
+  "arena_height": 1500.0,
+  "start_pose": {
+    "x": 627.0,
+    "y": 292.0,
+    "theta_deg": 0.0
+  },
+  "finish_box": {
+    "min_x": 5420.0,
+    "max_x": 5580.0,
+    "min_y": 1076.0,
+    "max_y": 1236.0
+  },
+  "obstacles": [
+    {
+      "x": 1986.0,
+      "y": 303.0,
+      "width": 105.0,
+      "height": 60.0,
+      "angle_deg": 0.0
+    }
+  ]
+}

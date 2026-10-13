@@ -15,8 +15,8 @@ test:
 sim-test:
     cd firmware && pio run -e sim_test -t exec
 
-# Kiem tra toan dien: format + lint (native + esp32) + test
-check: format-check lint test
+# Kiem tra toan dien: format + lint (native + esp32) + test + ne vat can
+check: format-check lint test sim-avoid
 
 # Tu dong format toan bo ma nguon bang clang-format
 format:
@@ -61,3 +61,7 @@ monitor:
 # Don dep cache PlatformIO
 clean:
     cd firmware && pio run -t clean
+
+# Kiem thu ne vat can headless (gach tren duong chay, khong va cham)
+sim-avoid:
+	cd firmware && pio run -e sim_avoid -t exec

@@ -63,14 +63,40 @@ void test_avoid() {
   frame.line_certainty = 1.0f;
   frame.dt = 0.01f;
   frame.obstacle_danger = 1.0f;  // vật cản sát
-  frame.obstacle_side = 0.8f;    // bên phải
+  frame.obstacle_side = 0.8f;    // bên phải → lái tránh sang trái
   const DriveState state;
   const RacePlan plan;
   const Tuning cfg;
-  // Tick 1: phát hiện → chuyển kBrake. Tick 2: phanh.
-  const auto r1 = step(state, frame, plan, cfg);
-  const auto r2 = step(r1.state, frame, plan, cfg);
-  CHECK(r2.command.brake);  // thấy vật cản gần → phanh trước (ticket 36)
+  const auto result = step(state, frame, plan, cfg);
+  CHECK(!result.command.brake);
+  CHECK(result.command.left_duty > result.command.right_duty);  // né sang trái
+}
+
+void test_field_continuous() {
+  using namespace lf::drive;
+  const RacePlan plan;
+  // Cùng side, quét danger: steer liên tục (không nhảy bậc) và đổi hướng theo bên.
+  float max_jump = 0.0f;
+  float prev = 0.0f;
+  for (int i = 0; i <= 100; ++i) {
+    Readings frame;
+    frame.obstacle_danger = 0.01f * static_cast<float>(i);
+    frame.obstacle_side = 0.7f;  // vật cản bên phải
+    DriveState s;
+    const FieldOut out = apply_field(0.0f, frame, s);
+    if (i > 0) {
+      max_jump = std::max(max_jump, std::abs(out.steer - prev));
+    }
+    prev = out.steer;
+  }
+  CHECK(max_jump < 0.02f);  // liên tục: bước danger 0.01 → steer đổi rất nhỏ
+  CHECK(prev < 0.0f);       // danger lớn → lái tránh sang trái (steer âm)
+  // Không có vật cản → giữ nguyên lái bám line, không giảm tốc.
+  const Readings clear;
+  DriveState s2;
+  const FieldOut passthrough = apply_field(0.42f, clear, s2);
+  CHECK(near(passthrough.steer, 0.42f));
+  CHECK(near(passthrough.speed_scale, 1.0f));
 }
 
 void test_mix() {
@@ -191,7 +217,8 @@ void test_normalize_tof() {
   lf::sensing::normalize_tof(frame, lf::sensing::kRobotLayout, 100.0f, 100.0f, 100.0f);
   CHECK(near(frame.obstacle_side, 0.0f, 1e-2f));
   // ngoài tầm → danger 0, side 0.
-  lf::sensing::normalize_tof(frame, lf::sensing::kRobotLayout, 300.0f, 300.0f, 300.0f);
+  const float far = lf::sensing::kRobotLayout.tof_range_mm + 1.0f;
+  lf::sensing::normalize_tof(frame, lf::sensing::kRobotLayout, far, far, far);
   CHECK(near(frame.obstacle_danger, 0.0f) && near(frame.obstacle_side, 0.0f));
 }
 
@@ -208,6 +235,7 @@ int main() {
   test_line_offset();
   test_steer();
   test_avoid();
+  test_field_continuous();
   test_mix();
   test_step_run1();
   test_step_finish();

@@ -20,9 +20,9 @@ struct RobotLayout {
   std::array<float, 8> ir_forward_mm = {55.0f, 55.0f, 55.0f, 55.0f, 55.0f, 55.0f, 55.0f, 55.0f};
 
   // ToF: 1 trước + 2 sườn.
-  float tof_range_mm = 300.0f;        // tầm hữu dụng
+  float tof_range_mm = 500.0f;        // tầm hữu dụng
   float tof_fov_deg = 25.0f;          // nửa FoV mỗi nón
-  float tof_side_angle_deg = 26.0f;   // góc ToF sườn so với heading (T04 đo để chọn)
+  float tof_side_angle_deg = 45.0f;   // góc ToF sườn so với heading (T04 đo để chọn)
   float tof_side_forward_mm = 15.0f;  // ToF sườn đặt lệch trước bao nhiêu mm
 
   float tick_length_mm = 20.0f;  // 1 tick odometry = 20mm

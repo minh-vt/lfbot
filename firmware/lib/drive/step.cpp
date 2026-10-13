@@ -11,16 +11,12 @@ constexpr float kCertaintyFloor = 0.05f;   // nền tin cậy cho trọng số l
 constexpr float kLostSpeed = 0.25f;        // tốc độ tìm vạch khi mất line (không dừng hẳn)
 constexpr float kRun2FeedbackGain = 0.4f;  // Run 2 = feedforward-dominant → PD nhẹ
 
-// Né vật cản (ticket 36): ngưỡng suy từ hình học ToF + state machine side-commit.
-constexpr float kDangerTrigger = 0.5f;  // danger > 0.5 ⟺ d < kTofRange/2
-constexpr float kClearTrigger = 0.2f;   // đã qua vật cản
-constexpr float kSideEps = 0.15f;       // |obstacle_side| dưới ngưỡng = chính diện
-constexpr float kDefaultSteer = 1.0f;   // chính diện → mặc định vòng phải
-constexpr float kAvoidSteer = 0.6f;     // lệch lái vòng (geometry: obstacle_half+robot_half)
-constexpr float kBrakeSpeed = 2.0f;     // tick/s — đủ chậm mới cam kết
-constexpr float kAvoidSpeed = 0.3f;   // tốc độ khi vòng (đủ chậm để tránh, đủ nhanh để lái vi sai)
-constexpr float kRejoinSpeed = 0.6f;  // tốc độ khi bám lại line
-constexpr float kRejoinEps = 0.5f;    // bám lại line khi |e| nhỏ
+// Trường thế né vật cản (ticket 03) — liên tục, không state machine.
+constexpr float kSideEps = 0.15f;      // |side| dưới ngưỡng = chính diện → dùng bộ nhớ
+constexpr float kRepelSteer = 1.0f;    // biên độ lái né (hình học: obstacle_half + robot_half)
+constexpr float kAvoidSlow = 0.85f;    // giảm tốc tối đa khi danger = 1
+constexpr float kSideMemory = 0.3f;    // hệ số nhớ rò hướng né (liên tục)
+constexpr float kTieBreakSide = 1.0f;  // hướng né khi chính diện (phá đối xứng)
 
 // Hệ số lọc 1st-order từ bandwidth: alpha = dt/(dt + 1/ωn).
 float filter_alpha(float bandwidth, float dt) {
@@ -53,51 +49,6 @@ void update_run1_speed(DriveState& s, float target, const Tuning& cfg, float dt)
   s.run1_speed = std::clamp(s.run1_speed, 0.0f, 1.0f);
 }
 
-struct AvoidBias {
-  float bias = 0.0f;         // lệch lái
-  float speed_scale = 1.0f;  // nhân tốc độ
-  bool brake = false;
-};
-
-// Vòng state machine né vật cản (ticket 36): phanh → cam kết bên → vòng → bám lại.
-AvoidBias avoid_steer(const Readings& f, DriveState& s, const RacePlan& plan, float tick) {
-  AvoidBias out;
-  switch (s.avoid) {
-    case AvoidPhase::kIdle:
-      if (f.obstacle_danger > kDangerTrigger) {
-        // avoid_side = HƯỚNG LÁI (tránh xa vật cản); chính diện → mặc định phải.
-        s.avoid_side = (std::abs(f.obstacle_side) > kSideEps)
-                         ? -std::copysign(1.0f, f.obstacle_side)
-                         : kDefaultSteer;
-        s.avoid = AvoidPhase::kBrake;
-      }
-      break;
-    case AvoidPhase::kBrake:
-      out.brake = true;
-      if (s.speed < kBrakeSpeed) {
-        s.avoid = AvoidPhase::kCommit;
-      }
-      break;
-    case AvoidPhase::kCommit:
-      out.bias = s.avoid_side * kAvoidSteer;
-      out.speed_scale = kAvoidSpeed;
-      if (f.obstacle_danger < kClearTrigger) {
-        s.avoid = AvoidPhase::kRejoin;
-      }
-      break;
-    case AvoidPhase::kRejoin:
-      out.bias = s.avoid_side * kAvoidSteer * 0.5f;
-      out.speed_scale = kRejoinSpeed;
-      if (std::abs(f.line_offset) < kRejoinEps && f.line_certainty > 0.5f) {
-        s.avoid = AvoidPhase::kIdle;
-      }
-      break;
-  }
-  // Run 2 biết trước bên né (ghi ở Run 1) → feedforward sớm; plan chưa ready trả 0.
-  out.bias += plan.obstacle_at(tick) * kAvoidSteer;
-  return out;
-}
-
 }
 
 // Stage 1 — chuyển động: encoder → quãng đường tick + tốc độ lọc.
@@ -121,6 +72,26 @@ LineBelief estimate_line(const Readings& frame, DriveState& next, const RacePlan
   belief.offset = belief.certainty * (estimate - plan.offset_at(tick));
   belief.heading = estimate_heading(frame, next, cfg, dt);
   return belief;
+}
+
+// Stage 4 — trường thế liên tục: line HÚT (path_steer), vật cản ĐẨY (-side·kRepel).
+// Quyền điều khiển trộn liên tục theo danger (không state machine, không snap ±1).
+FieldOut apply_field(float path_steer, const Readings& f, DriveState& s) {
+  const float w = f.obstacle_danger;
+  FieldOut out;
+  out.speed_scale = 1.0f - w * kAvoidSlow;  // giảm tốc liên tục
+  if (w <= 0.0f) {
+    out.steer = path_steer;
+    return out;
+  }
+  // Hướng lái tránh = -side. Chính diện (|side| nhỏ) → khoá về một bên cố định để phá
+  // đối xứng; bộ nhớ rò làm chuyển tiếp LIÊN TỤC (không snap ±1).
+  const float measured = -f.obstacle_side;
+  const float desired = (std::abs(measured) > kSideEps) ? measured : kTieBreakSide;
+  s.avoid_side += kSideMemory * (desired - s.avoid_side);
+  const float avoid_steer = s.avoid_side * kRepelSteer;
+  out.steer = (1.0f - w) * path_steer + w * avoid_steer;
+  return out;
 }
 
 // Niềm tin liên tục về lệch vạch: đo + ước lượng, trọng số theo độ tin cậy sensor.
@@ -196,17 +167,17 @@ StepResult step(const DriveState& state, const Readings& frame, const RacePlan& 
     plan.line_curve_at(motion.tick) +
     feedback_gain * steer_to_line(belief.offset, belief.heading, next.speed, next, cfg);
 
-  // Stage 4 — né vật cản (bias + tốc độ).
-  const AvoidBias avoid = avoid_steer(frame, next, plan, motion.tick);
+  // Stage 4 — trường thế né vật cản (trộn liên tục theo danger).
+  const FieldOut field = apply_field(path_steer, frame, next);
 
   // Stage 5 — tốc độ.
-  const float steer = std::clamp(path_steer + avoid.bias, -1.0f, 1.0f);
+  const float steer = std::clamp(field.steer, -1.0f, 1.0f);
   const float throttle =
-    choose_speed(motion.tick, belief.offset, steer, frame, plan, next, cfg) * avoid.speed_scale;
+    choose_speed(motion.tick, belief.offset, steer, frame, plan, next, cfg) * field.speed_scale;
 
   // Stage 6 — trộn ra lệnh bánh.
   next.finish_latched = state.finish_latched || frame.finish_detected;
-  const DriveCommand command = drive_motors(throttle, steer, next.finish_latched || avoid.brake);
+  const DriveCommand command = drive_motors(throttle, steer, next.finish_latched);
   return {command, next, path_steer};
 }
 
