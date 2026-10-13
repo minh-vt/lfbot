@@ -4,9 +4,11 @@
 
 **Blocked by:** 01 — RobotLayout SSoT (các stage đọc hình học từ nguồn chân lý).
 
-**Status:** ready-for-agent
+**Status:** done (2026-10-12)
 
-- [ ] `step()` là pass-manager gọi các stage theo thứ tự; không còn logic điều khiển nội tuyến trong `step()`.
-- [ ] setpoint và feedforward không còn nhánh `plan.ready` (đọc plan rỗng → 0).
-- [ ] Mỗi stage có một unit test trực tiếp (hành vi ngoài, không chi tiết cài đặt).
-- [ ] `just test` xanh — hành vi bên ngoài giữ nguyên so với trước khi tách.
+- [x] `step()` là pass-manager gọi các stage theo thứ tự; không còn logic điều khiển nội tuyến trong `step()`.
+- [x] setpoint và feedforward không còn nhánh `plan.ready` (accessor plan trả trung tính 0/1 khi chưa ready → đọc plan rỗng ra 0).
+- [x] Mỗi stage có một unit test trực tiếp (`estimate_motion`, `estimate_line`; steer/avoid/speed/mix qua các seam hiện có).
+- [x] `just test` xanh — hành vi giữ nguyên (sim-test: Run1 40.46s OK, Run2 DQ không đổi).
+
+*Ghi chú:* `choose_speed` còn một nhánh `plan.ready` (khác biệt ngữ nghĩa Run1/Run2 về nguồn tốc độ) và `feedback_gain` — chưa gộp vì thuộc phạm vi ticket 03/06.

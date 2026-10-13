@@ -93,17 +93,37 @@ AvoidBias avoid_steer(const Readings& f, DriveState& s, const RacePlan& plan, fl
       }
       break;
   }
-  // Run 2 biết trước bên né (ghi ở Run 1) → feedforward sớm.
-  if (plan.ready) {
-    out.bias += plan.obstacle_at(tick) * kAvoidSteer;
-  }
+  // Run 2 biết trước bên né (ghi ở Run 1) → feedforward sớm; plan chưa ready trả 0.
+  out.bias += plan.obstacle_at(tick) * kAvoidSteer;
   return out;
 }
 
 }
 
-// Niềm tin liên tục về lệch vạch: đo + ước lượng, trọng số theo độ tin cậy sensor.
+// Stage 1 — chuyển động: encoder → quãng đường tick + tốc độ lọc.
+MotionEstimate estimate_motion(const Readings& frame, const DriveState& state, const Tuning& cfg,
+                               float dt) {
+  // Encoder thô ở 20mm/tick nên cần lọc mạnh.
+  const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
+  const float speed_raw = (tick - state.prev_tick) / dt;
+  const float alpha = filter_alpha(cfg.robot.bandwidth * 0.5f, dt);
+  return {tick, state.speed + alpha * (speed_raw - state.speed)};
+}
+
+// Stage 2 — niềm tin vạch: sensor + ước lượng → lệch (đã trọng số) + heading.
 // Mất vạch (certainty → 0) → line_estimate đứng yên (đi thẳng mượt), không slam ±1.
+LineBelief estimate_line(const Readings& frame, DriveState& next, const RacePlan& plan, float tick,
+                         float dt, const Tuning& cfg) {
+  LineBelief belief;
+  belief.certainty = certainty_weight(frame.line_certainty);
+  const float estimate = fuse_line_offset(frame, next);
+  // plan chưa ready → offset_at trả 0 (không cần rẽ nhánh).
+  belief.offset = belief.certainty * (estimate - plan.offset_at(tick));
+  belief.heading = estimate_heading(frame, next, cfg, dt);
+  return belief;
+}
+
+// Niềm tin liên tục về lệch vạch: đo + ước lượng, trọng số theo độ tin cậy sensor.
 float fuse_line_offset(const Readings& frame, DriveState& state) {
   const float blend = certainty_weight(frame.line_certainty);
   state.line_estimate += blend * (frame.line_offset - state.line_estimate);
@@ -157,37 +177,34 @@ DriveCommand drive_motors(float throttle, float steer, bool brake) {
   return {left, right, false};
 }
 
+// Pass-manager: gọi các stage theo thứ tự, không chứa logic điều khiển nội tuyến.
 StepResult step(const DriveState& state, const Readings& frame, const RacePlan& plan,
                 const Tuning& cfg) {
   DriveState next = state;
-  const float safe_dt = std::max(frame.dt, 1e-4f);
+  const float dt = std::max(frame.dt, 1e-4f);
 
-  // Tốc độ (tick/s) đã lọc — encoder thô ở 20mm/tick nên cần lọc mạnh.
-  const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
-  const float v_raw = (tick - state.prev_tick) / safe_dt;
-  next.prev_tick = tick;
-  next.speed += filter_alpha(cfg.robot.bandwidth * 0.5f, safe_dt) * (v_raw - state.speed);
+  const MotionEstimate motion = estimate_motion(frame, state, cfg, dt);
+  next.prev_tick = motion.tick;
+  next.speed = motion.speed;
 
-  // Lệch ngang (racing-line setpoint ở Run 2) + heading.
   next.prev_line_estimate = state.line_estimate;
-  const float setpoint = plan.ready ? plan.offset_at(tick) : 0.0f;
-  // Mất vạch (weight→0) → error→0 → giữ heading (đi thẳng), không bám estimate đóng băng.
-  const float error =
-    certainty_weight(frame.line_certainty) * (fuse_line_offset(frame, next) - setpoint);
-  const float heading = estimate_heading(frame, next, cfg, safe_dt);
+  const LineBelief belief = estimate_line(frame, next, plan, motion.tick, dt, cfg);
 
-  // Feedforward (geometry) khi plan ready (Run 2); Run 1 thuần phản ứng.
-  // Run 2 = feedforward-dominant → giảm PD để tránh double-correct (ổn định).
-  const float feedforward = plan.ready ? plan.line_curve_at(tick) : 0.0f;
+  // Stage 3 — lái: feedforward (Run 2) + feedback; Run 1 thuần phản ứng.
   const float feedback_gain = plan.ready ? kRun2FeedbackGain : 1.0f;
   const float path_steer =
-    feedforward + feedback_gain * steer_to_line(error, heading, next.speed, next, cfg);
+    plan.line_curve_at(motion.tick) +
+    feedback_gain * steer_to_line(belief.offset, belief.heading, next.speed, next, cfg);
 
-  const AvoidBias avoid = avoid_steer(frame, next, plan, tick);
+  // Stage 4 — né vật cản (bias + tốc độ).
+  const AvoidBias avoid = avoid_steer(frame, next, plan, motion.tick);
+
+  // Stage 5 — tốc độ.
   const float steer = std::clamp(path_steer + avoid.bias, -1.0f, 1.0f);
   const float throttle =
-    choose_speed(tick, error, steer, frame, plan, next, cfg) * avoid.speed_scale;
+    choose_speed(motion.tick, belief.offset, steer, frame, plan, next, cfg) * avoid.speed_scale;
 
+  // Stage 6 — trộn ra lệnh bánh.
   next.finish_latched = state.finish_latched || frame.finish_detected;
   const DriveCommand command = drive_motors(throttle, steer, next.finish_latched || avoid.brake);
   return {command, next, path_steer};

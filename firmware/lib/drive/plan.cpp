@@ -65,24 +65,27 @@ void plan_offset_pass(RacePlan& plan) {
 
 }
 
+// Truy cập plan trả giá trị TRUNG TÍNH khi chưa ready (đang ghi hoặc chưa plan):
+// feedforward/setpoint/obstacle → 0; speed_limit → 1 (không chặn). Nhờ vậy step()
+// không cần rẽ nhánh `plan.ready` cho setpoint/feedforward.
 float RacePlan::planned_steer_at(float tick) const {
-  return interp(planned_steer.data(), length, tick);
+  return ready ? interp(planned_steer.data(), length, tick) : 0.0f;
 }
 
 float RacePlan::line_curve_at(float tick) const {
-  return interp(line_curve.data(), length, tick);
+  return ready ? interp(line_curve.data(), length, tick) : 0.0f;
 }
 
 float RacePlan::obstacle_at(float tick) const {
-  return interp(obstacle_side.data(), length, tick);
+  return ready ? interp(obstacle_side.data(), length, tick) : 0.0f;
 }
 
 float RacePlan::speed_limit_at(float tick) const {
-  return interp(speed_limit.data(), length, tick);
+  return ready ? interp(speed_limit.data(), length, tick) : 1.0f;
 }
 
 float RacePlan::offset_at(float tick) const {
-  return interp(offset_setpoint.data(), length, tick);
+  return ready ? interp(offset_setpoint.data(), length, tick) : 0.0f;
 }
 
 void record(RacePlan& plan, float tick, float steer, float obstacle_side) {

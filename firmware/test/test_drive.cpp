@@ -130,6 +130,44 @@ void test_plan_speed() {
   CHECK(plan.speed_limit[3] < plan.speed_limit[1]);  // backward-pass: giảm trước cua
 }
 
+void test_estimate_motion() {
+  using namespace lf::drive;
+  Readings frame;
+  frame.enc_l = 10;
+  frame.enc_r = 10;
+  const DriveState state;
+  const Tuning cfg;
+  const MotionEstimate motion = estimate_motion(frame, state, cfg, 0.01f);
+  CHECK(near(motion.tick, 10.0f));
+  CHECK(motion.speed > 0.0f);  // có encoder increment → tốc độ dương
+  // Hội tụ về v_raw = 10 tick / 0.01s = 1000 tick/s.
+  DriveState s;
+  float speed = 0.0f;
+  for (int i = 0; i < 4000; ++i) {
+    s.speed = speed;
+    speed = estimate_motion(frame, s, cfg, 0.01f).speed;
+  }
+  CHECK(near(speed, 1000.0f, 2.0f));
+}
+
+void test_estimate_line() {
+  using namespace lf::drive;
+  Readings frame;
+  frame.line_offset = 0.5f;
+  frame.line_certainty = 1.0f;
+  const RacePlan plan;  // rỗng → offset_at trả 0 (không rẽ nhánh)
+  const Tuning cfg;
+  DriveState next;
+  float offset = 0.0f;
+  for (int i = 0; i < 400; ++i) {
+    next.prev_line_estimate = next.line_estimate;
+    offset = estimate_line(frame, next, plan, 0.0f, 0.01f, cfg).offset;
+  }
+  CHECK(near(next.line_estimate, 0.5f, 1e-2f));  // hội tụ về offset sensor
+  CHECK(offset > 0.0f);                          // dương = vạch lệch phải
+  CHECK(offset < 0.5f);                          // có trọng số tin cậy (< 1)
+}
+
 void test_normalize_ir() {
   lf::sensing::IrReadings readings;
   for (auto& value : readings.raw) {
@@ -174,6 +212,8 @@ int main() {
   test_step_run1();
   test_step_finish();
   test_plan_speed();
+  test_estimate_motion();
+  test_estimate_line();
   test_normalize_ir();
   test_normalize_tof();
   test_geometry_matches_layout();
