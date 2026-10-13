@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "sensing/layout.hpp"
+
 namespace lf::sim {
 
 void TrackRules::reset(const TrackManifest& manifest) {
@@ -19,6 +21,7 @@ void TrackRules::check(float x, float y, float v, bool line_detected, float dt) 
     return;
   }
   elapsed_s_ += dt;
+  const float robot_radius = sensing::robot_radius_mm(sensing::kRobotLayout);
 
   line_lost_s_ = line_detected ? 0.0f : line_lost_s_ + dt;
   if (line_lost_s_ > kLineLostTimeoutS) {
@@ -31,8 +34,8 @@ void TrackRules::check(float x, float y, float v, bool line_detected, float dt) 
     return;
   }
 
-  if (x < kRobotRadiusMm || y < kRobotRadiusMm || x > manifest_->arena_width_mm - kRobotRadiusMm ||
-      y > manifest_->arena_height_mm - kRobotRadiusMm) {
+  if (x < robot_radius || y < robot_radius || x > manifest_->arena_width_mm - robot_radius ||
+      y > manifest_->arena_height_mm - robot_radius) {
     infraction_ = Infraction::kOutOfBounds;
     return;
   }
@@ -44,7 +47,7 @@ void TrackRules::check(float x, float y, float v, bool line_detected, float dt) 
     const float cy = std::max(obstacle.y_mm - half_h, std::min(y, obstacle.y_mm + half_h));
     const float dx = x - cx;
     const float dy = y - cy;
-    if (dx * dx + dy * dy <= kRobotRadiusMm * kRobotRadiusMm) {
+    if (dx * dx + dy * dy <= robot_radius * robot_radius) {
       infraction_ = Infraction::kObstacleCollision;
       return;
     }

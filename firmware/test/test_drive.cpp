@@ -3,6 +3,7 @@
 
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
+#include "sensing/layout.hpp"
 #include "sensing/normalize.hpp"
 
 namespace {
@@ -134,10 +135,10 @@ void test_normalize_ir() {
   for (auto& value : readings.raw) {
     value = 4095;  // toàn trắng
   }
-  auto result = lf::sensing::normalize_ir(readings);
+  auto result = lf::sensing::normalize_ir(readings, lf::sensing::kRobotLayout);
   CHECK(result.line_certainty < 1e-3f);
   readings.raw[7] = 0;  // vạch ở cảm biến phải ngoài
-  result = lf::sensing::normalize_ir(readings);
+  result = lf::sensing::normalize_ir(readings, lf::sensing::kRobotLayout);
   CHECK(result.line_certainty > 0.0f);
   CHECK(result.line_offset > 0.9f);
 }
@@ -145,15 +146,22 @@ void test_normalize_ir() {
 void test_normalize_tof() {
   lf::drive::Readings frame;
   // obstacle trái rõ (d_left=100 << d_right=300) → side âm, liên tục (không slam −1).
-  lf::sensing::normalize_tof(frame, 300.0f, 300.0f, 100.0f, 300.0f);
+  lf::sensing::normalize_tof(frame, lf::sensing::kRobotLayout, 300.0f, 100.0f, 300.0f);
   CHECK(frame.obstacle_danger > 0.0f);
   CHECK(near(frame.obstacle_side, -0.5f, 1e-2f));
   // đối xứng → side = 0 (không biết né bên nào → đi thẳng, danger vẫn giảm ga).
-  lf::sensing::normalize_tof(frame, 300.0f, 100.0f, 100.0f, 100.0f);
+  lf::sensing::normalize_tof(frame, lf::sensing::kRobotLayout, 100.0f, 100.0f, 100.0f);
   CHECK(near(frame.obstacle_side, 0.0f, 1e-2f));
   // ngoài tầm → danger 0, side 0.
-  lf::sensing::normalize_tof(frame, 300.0f, 300.0f, 300.0f, 300.0f);
+  lf::sensing::normalize_tof(frame, lf::sensing::kRobotLayout, 300.0f, 300.0f, 300.0f);
   CHECK(near(frame.obstacle_danger, 0.0f) && near(frame.obstacle_side, 0.0f));
+}
+
+void test_geometry_matches_layout() {
+  // Default RobotTuning phải khớp hằng suy ra từ layout SSoT (chống drift).
+  const lf::drive::RobotTuning robot;
+  CHECK(near(robot.geometry_l, lf::sensing::geometry_l(lf::sensing::kRobotLayout)));
+  CHECK(near(robot.geometry_s, lf::sensing::geometry_s(lf::sensing::kRobotLayout)));
 }
 
 }
@@ -168,6 +176,7 @@ int main() {
   test_plan_speed();
   test_normalize_ir();
   test_normalize_tof();
+  test_geometry_matches_layout();
 
   if (failures() == 0) {
     (void)std::printf("test_drive: ALL PASS\n");

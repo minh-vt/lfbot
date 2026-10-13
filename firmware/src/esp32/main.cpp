@@ -8,6 +8,7 @@
 #include "actuators.hpp"
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
+#include "sensing/layout.hpp"
 #include "sensors.hpp"
 
 namespace {
@@ -28,7 +29,10 @@ bool button_pressed(int pin) {
 
 // Vòng điều khiển 500Hz hard real-time (FreeRTOS task, core 1).
 void control_task(void* /*arg*/) {
-  const lf::drive::Tuning cfg;
+  lf::drive::Tuning cfg;
+  // Hình học không-thứ-nguyên suy trực tiếp từ layout SSoT.
+  cfg.robot.geometry_l = lf::sensing::geometry_l(lf::sensing::kRobotLayout);
+  cfg.robot.geometry_s = lf::sensing::geometry_s(lf::sensing::kRobotLayout);
   TickType_t last_wake = xTaskGetTickCount();
 
   for (;;) {

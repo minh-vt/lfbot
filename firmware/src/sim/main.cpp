@@ -9,6 +9,7 @@
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
 #include "renderer.hpp"
+#include "sensing/layout.hpp"
 #include "speed_limit_calibration.hpp"
 #include "track_asset.hpp"
 #include "track_rules.hpp"
@@ -39,8 +40,6 @@ bool load_tuning_config(const char* path, lf::drive::Tuning& tuning) {
     nlohmann::json doc = nlohmann::json::parse(file);
     if (doc.contains("robot")) {
       const auto& r = doc.at("robot");
-      tuning.robot.geometry_l = r.value("geometry_l", tuning.robot.geometry_l);
-      tuning.robot.geometry_s = r.value("geometry_s", tuning.robot.geometry_s);
       tuning.robot.bandwidth = r.value("bandwidth", tuning.robot.bandwidth);
       tuning.robot.damping = r.value("damping", tuning.robot.damping);
     }
@@ -326,8 +325,11 @@ int main() {
 
   drive::Tuning cfg;
   load_tuning_config(kTuningPath, cfg);
-  cfg.robot.speed_limit_table =
-    sim::calibrate_speed_limit(cfg.robot, sim::kMaxWheelSpeedMps * sim::kTicksPerMeter);
+  // Hình học không-thứ-nguyên suy trực tiếp từ layout SSoT (không qua JSON).
+  cfg.robot.geometry_l = sensing::geometry_l(sensing::kRobotLayout);
+  cfg.robot.geometry_s = sensing::geometry_s(sensing::kRobotLayout);
+  cfg.robot.speed_limit_table = sim::calibrate_speed_limit(
+    cfg.robot, sim::kMaxWheelSpeedMps * sensing::ticks_per_meter(sensing::kRobotLayout));
 
   drive::DriveState state;
   drive::RacePlan plan;

@@ -3,14 +3,19 @@
 #include <cstdint>
 
 #include "drive/types.hpp"
+#include "sensing/layout.hpp"
 #include "sim_config.hpp"
 #include "track_asset.hpp"
 
 namespace lf::sim {
 
 // Vật lý vi sai + cảm biến (physical ↔ normalized), adapter cho drive.
+// Hình học robot đọc từ `RobotLayout` (SSoT) — đổi layout là đổi cả mô hình cảm biến.
 class WorldPhysics {
 public:
+  explicit WorldPhysics(const sensing::RobotLayout& layout = sensing::kRobotLayout)
+    : layout_(layout) {}
+
   void reset(const TrackManifest& manifest);
   void step(const lf::drive::DriveCommand& cmd, float dt);
   void sample(lf::drive::Readings& frame, float dt, const TrackAsset& track);
@@ -28,6 +33,8 @@ public:
 
 private:
   [[nodiscard]] float cone_tof(float ox, float oy, float center_angle) const;
+
+  sensing::RobotLayout layout_;
 
   float x_ = 0.0f;
   float y_ = 0.0f;

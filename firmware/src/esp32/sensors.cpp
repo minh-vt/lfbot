@@ -45,9 +45,9 @@ struct Hardware {
 Hardware g_hw;
 
 // ToF cập nhật nền; vòng 500Hz chỉ đọc cache (atomic), không bao giờ block.
-std::atomic<float> g_tof_front_mm{sensing::kTofRangeMm};
-std::atomic<float> g_tof_left_mm{sensing::kTofRangeMm};
-std::atomic<float> g_tof_right_mm{sensing::kTofRangeMm};
+std::atomic<float> g_tof_front_mm{sensing::kRobotLayout.tof_range_mm};
+std::atomic<float> g_tof_left_mm{sensing::kRobotLayout.tof_range_mm};
+std::atomic<float> g_tof_right_mm{sensing::kRobotLayout.tof_range_mm};
 
 // PCNT encoder (quadrature).
 void init_encoder(int gpio_a, int gpio_b, pcnt_unit_handle_t* unit) {
@@ -106,7 +106,7 @@ void tof_write_reg(i2c_master_dev_handle_t device, std::uint8_t reg, std::uint8_
 
 float tof_read_mm(i2c_master_dev_handle_t device) {
   if (device == nullptr) {
-    return sensing::kTofRangeMm;
+    return sensing::kRobotLayout.tof_range_mm;
   }
   tof_write_reg(device, 0x00, 0x01);  // SYSRANGE_START: single-shot
   vTaskDelay(pdMS_TO_TICKS(30));
@@ -115,7 +115,7 @@ float tof_read_mm(i2c_master_dev_handle_t device) {
   tof_write_reg(device, 0x0B, 0x01);  // SYSTEM_INTERRUPT_CLEAR
   const auto mm =
     static_cast<float>((static_cast<std::uint16_t>(msb) << 8) | static_cast<std::uint16_t>(lsb));
-  return (mm > 0.0f && mm < 2000.0f) ? mm : sensing::kTofRangeMm;
+  return (mm > 0.0f && mm < 2000.0f) ? mm : sensing::kRobotLayout.tof_range_mm;
 }
 
 // Quét 3 ToF nền (~30ms/con) → ghi cache. Vòng điều khiển chỉ đọc cache.
@@ -172,16 +172,16 @@ void sensors_init() {
 
 void sensors_read(lf::drive::Readings& frame, float dt) {
   sensing::IrReadings ir;
-  for (std::size_t i = 0; i < sensing::kIrOffsetsMm.size(); ++i) {
+  for (std::size_t i = 0; i < sensing::kRobotLayout.ir_lateral_mm.size(); ++i) {
     int raw = 0;
     adc_oneshot_read(g_hw.adc, kIrChannel[i], &raw);
     ir.raw[i] = static_cast<std::uint16_t>(raw);
   }
-  const sensing::IrResult ir_result = sensing::normalize_ir(ir);
+  const sensing::IrResult ir_result = sensing::normalize_ir(ir, sensing::kRobotLayout);
   frame.line_offset = ir_result.line_offset;
   frame.line_certainty = ir_result.line_certainty;
 
-  sensing::normalize_tof(frame, sensing::kTofRangeMm, g_tof_front_mm.load(), g_tof_left_mm.load(),
+  sensing::normalize_tof(frame, sensing::kRobotLayout, g_tof_front_mm.load(), g_tof_left_mm.load(),
                          g_tof_right_mm.load());
 
   frame.enc_l = read_encoder(g_hw.enc_left);

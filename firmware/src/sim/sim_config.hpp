@@ -6,15 +6,9 @@
 
 namespace lf::sim {
 
+// Hằng số chỉ thuộc MÔ HÌNH SIM. Hình học robot/cảm biến ở `sensing::kRobotLayout`.
 constexpr float kPi = 3.14159265358979323846f;
-constexpr float kWheelSeparationMm = 138.0f;
-constexpr float kMaxWheelSpeedMps = 1.0f;    // duty=1 → 1.0 m/s
-constexpr float kSensorLookaheadMm = 55.0f;  // cảm biến cách trục sau
-constexpr float kTicksPerMeter = 50.0f;      // 1 tick = 20 mm (chỉ số plan ≤ kMaxPlanTicks)
-constexpr float kRobotHalfLengthMm = 72.5f;  // robot 145mm
-constexpr float kRobotHalfWidthMm = 69.0f;   // robot 138mm
-// Bán kính bao robot = nửa đường chéo = sqrt(72.5² + 69²) ≈ 100.1mm.
-constexpr float kRobotRadiusMm = 100.1f;
+constexpr float kMaxWheelSpeedMps = 1.0f;     // duty=1 → 1.0 m/s
 constexpr float kLineDarkThreshold = 128.0f;  // < 128 = vạch (đen)
 constexpr float kLineLostTimeoutS = 5.0f;
 constexpr float kTimeLimitS = 180.0f;

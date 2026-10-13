@@ -7,11 +7,24 @@
 #include <cmath>
 #include <cstdio>
 
+#include "sensing/layout.hpp"
 #include "sensing/normalize.hpp"
 #include "sim_config.hpp"
 
 namespace lf::sim {
 namespace {
+
+// Layout robot hiện tại (SSoT) — renderer đọc hình học từ đây.
+constexpr sensing::RobotLayout kLayout = sensing::kRobotLayout;
+
+// Điểm tham chiếu của thanh IR (trung bình forward) — dùng cho kim lái.
+float ir_forward_reference(const sensing::RobotLayout& layout) {
+  float sum = 0.0f;
+  for (const float forward : layout.ir_forward_mm) {
+    sum += forward;
+  }
+  return sum / static_cast<float>(layout.ir_forward_mm.size());
+}
 
 constexpr int kDefaultWinW = 1920;
 constexpr int kDefaultWinH = 1080;
@@ -136,8 +149,8 @@ void Renderer::update_camera(float rx, float ry, float theta, float v, float dt,
 void Renderer::draw_ghost_chassis(float rx, float ry, float theta) {
   const float cos_t = std::cos(theta);
   const float sin_t = std::sin(theta);
-  const float hl = kRobotHalfLengthMm;
-  const float hw = kRobotHalfWidthMm;
+  const float hl = kLayout.half_length_mm;
+  const float hw = kLayout.half_width_mm;
 
   const Vector2 p1 = {rx + hl * cos_t - hw * sin_t, ry + hl * sin_t + hw * cos_t};
   const Vector2 p2 = {rx + hl * cos_t + hw * sin_t, ry + hl * sin_t - hw * cos_t};
@@ -157,13 +170,14 @@ void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, f
                             float d_front, float d_left, float d_right) {
   const float cos_t = std::cos(theta);
   const float sin_t = std::sin(theta);
-  const float front_x = rx + kSensorLookaheadMm * cos_t;
-  const float front_y = ry + kSensorLookaheadMm * sin_t;
+  const float ir_fwd = ir_forward_reference(kLayout);
+  const float front_x = rx + ir_fwd * cos_t;
+  const float front_y = ry + ir_fwd * sin_t;
   const float perp_x = -sin_t;
   const float perp_y = cos_t;
 
-  const float hl = kRobotHalfLengthMm;
-  const float hw = kRobotHalfWidthMm;
+  const float hl = kLayout.half_length_mm;
+  const float hw = kLayout.half_width_mm;
 
   // 3 Nón ToF: 1 ở phía trước, 2 ở hai bên sườn xe, mang 3 màu sắc khác biệt.
   const auto draw_cone = [](Vector2 origin, float center_rad, float dist_mm, Color col) {
@@ -171,7 +185,7 @@ void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, f
     const float center_deg = center_rad * 180.0f / kPi;
     const float start_deg = center_deg - kHalfFovDeg;
     const float end_deg = center_deg + kHalfFovDeg;
-    const float r = std::clamp(dist_mm, 20.0f, sensing::kTofRangeMm);
+    const float r = std::clamp(dist_mm, 20.0f, kLayout.tof_range_mm);
     const bool danger = (dist_mm < 280.0f);
 
     const Color fill = danger ? Color{245, 158, 11, 50} : Color{col.r, col.g, col.b, 35};
@@ -182,20 +196,29 @@ void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, f
     DrawCircleV(origin, 3.2f, danger ? kAmberAlert : col);
   };
 
+  const float side_angle = kLayout.tof_side_angle_deg * kPi / 180.0f;
+  const float side_fwd = kLayout.tof_side_forward_mm;
+
   // 1. Front ToF (Mũi trước, 0°): Sky Blue #38bdf8
   const Vector2 pos_front = {rx + hl * cos_t, ry + hl * sin_t};
   constexpr Color kToFFrontCol = {56, 189, 248, 255};
   draw_cone(pos_front, theta, d_front, kToFFrontCol);
 
-  // 2. Left ToF (Sườn trái, -26°): Emerald Green #34d399
-  const Vector2 pos_left = {rx + 15.0f * cos_t - hw * perp_x, ry + 15.0f * sin_t - hw * perp_y};
+  // 2. Left ToF (Sườn trái): Emerald Green #34d399
+  const Vector2 pos_left = {
+    rx + side_fwd * cos_t - hw * perp_x,
+    ry + side_fwd * sin_t - hw * perp_y,
+  };
   constexpr Color kToFLeftCol = {52, 211, 153, 255};
-  draw_cone(pos_left, theta - 0.45f, d_left, kToFLeftCol);
+  draw_cone(pos_left, theta - side_angle, d_left, kToFLeftCol);
 
-  // 3. Right ToF (Sườn phải, +26°): Violet #a855f7
-  const Vector2 pos_right = {rx + 15.0f * cos_t + hw * perp_x, ry + 15.0f * sin_t + hw * perp_y};
+  // 3. Right ToF (Sườn phải): Violet #a855f7
+  const Vector2 pos_right = {
+    rx + side_fwd * cos_t + hw * perp_x,
+    ry + side_fwd * sin_t + hw * perp_y,
+  };
   constexpr Color kToFRightCol = {168, 85, 247, 255};
-  draw_cone(pos_right, theta + 0.45f, d_right, kToFRightCol);
+  draw_cone(pos_right, theta + side_angle, d_right, kToFRightCol);
 
   // Khung xe 145x138mm
   const Vector2 p1 = {rx + hl * cos_t - hw * sin_t, ry + hl * sin_t + hw * cos_t};
@@ -210,11 +233,12 @@ void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, f
   DrawLineEx(p3, p4, 1.8f, Color{244, 244, 245, 230});
   DrawLineEx(p4, p1, 1.8f, Color{244, 244, 245, 230});
 
-  // 8 Mắt IR micro-LED trên cản trước
-  for (std::size_t i = 0; i < sensing::kIrOffsetsMm.size(); ++i) {
-    const float off = sensing::kIrOffsetsMm[i];
-    const float sx = front_x + off * perp_x;
-    const float sy = front_y + off * perp_y;
+  // 8 Mắt IR micro-LED (vị trí từng mắt lấy từ layout)
+  for (std::size_t i = 0; i < kLayout.ir_lateral_mm.size(); ++i) {
+    const float fwd = kLayout.ir_forward_mm[i];
+    const float off = kLayout.ir_lateral_mm[i];
+    const float sx = rx + fwd * cos_t + off * perp_x;
+    const float sy = ry + fwd * sin_t + off * perp_y;
     const float weight = ir_weights[i];
     if (weight > 0.1f) {
       DrawCircleV(Vector2{sx, sy}, 3.5f, kZincWhite);
@@ -246,13 +270,13 @@ void Renderer::draw_predictive_arc(float rx, float ry, float theta, float curvat
     return;  // thẳng → kim path_steer đã đủ
   }
   const Color col = (speed_limit < 0.7f) ? Color{245, 158, 11, 220} : Color{56, 189, 248, 180};
-  const float kappa_mm = 2.0f * abs_k / kWheelSeparationMm;  // 1/mm
+  const float kappa_mm = 2.0f * abs_k / kLayout.wheelbase_mm;  // 1/mm
   const float sign = (curvature > 0.0f) ? 1.0f : -1.0f;
   constexpr float kArcLenMm = 250.0f;
   constexpr int kSeg = 16;
   const float step = kArcLenMm / static_cast<float>(kSeg);
-  float px = rx + kRobotHalfLengthMm * std::cos(theta);
-  float py = ry + kRobotHalfLengthMm * std::sin(theta);
+  float px = rx + kLayout.half_length_mm * std::cos(theta);
+  float py = ry + kLayout.half_length_mm * std::sin(theta);
   float ph = theta;
   Vector2 prev = {px, py};
   for (int i = 0; i < kSeg; ++i) {
@@ -411,7 +435,7 @@ void Renderer::draw_top_dock(const TrackManifest& manifest, const RenderFrame& f
   const char* cam_name = chase_camera_ ? "CHASE CAM" : "OVERVIEW";
   const char* play_state = frame.paused ? "PAUSED" : "RUNNING";
   const float r_m = (std::abs(frame.curvature) > 1e-3f)
-                      ? (kWheelSeparationMm / (2.0f * std::abs(frame.curvature))) / 1000.0f
+                      ? (kLayout.wheelbase_mm / (2.0f * std::abs(frame.curvature))) / 1000.0f
                       : 999.0f;
   const char* curve_tag = "THANG";
   if (r_m <= 0.7f) {

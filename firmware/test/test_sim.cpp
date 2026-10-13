@@ -2,6 +2,7 @@
 
 #include "drive/plan.hpp"
 #include "drive/step.hpp"
+#include "sensing/layout.hpp"
 #include "speed_limit_calibration.hpp"
 #include "track_asset.hpp"
 #include "track_rules.hpp"
@@ -51,8 +52,10 @@ int main() {
   rules.reset(track.manifest());
 
   drive::Tuning cfg;
-  cfg.robot.speed_limit_table =
-    sim::calibrate_speed_limit(cfg.robot, sim::kMaxWheelSpeedMps * sim::kTicksPerMeter);
+  cfg.robot.geometry_l = sensing::geometry_l(sensing::kRobotLayout);
+  cfg.robot.geometry_s = sensing::geometry_s(sensing::kRobotLayout);
+  cfg.robot.speed_limit_table = sim::calibrate_speed_limit(
+    cfg.robot, sim::kMaxWheelSpeedMps * sensing::ticks_per_meter(sensing::kRobotLayout));
   drive::DriveState state;
   drive::RacePlan plan;
   drive::RunMode mode = drive::RunMode::kRun1;
