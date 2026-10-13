@@ -50,7 +50,8 @@ void control_task(void* /*arg*/) {
     g_state = result.state;
     if (g_mode == lf::drive::RunMode::kRun1) {
       const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
-      lf::drive::record(g_plan, tick, result.path_steer, frame.obstacle_side);
+      lf::drive::record(g_plan, tick, result.state.line_estimate, result.state.run1_speed,
+                        frame.obstacle_side);
     }
     lf::esp32::actuators_write(result.command);
 

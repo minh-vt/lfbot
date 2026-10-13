@@ -57,6 +57,9 @@ bool TrackAsset::load(const std::string& manifest_path) {
   } catch (const json::exception&) {
     return false;
   }
+  // Xóa manifest cũ trước khi nạp: nếu không, obstacles của màn cũ sẽ tích lũy
+  // và các khóa thiếu trong JSON mới sẽ giữ giá trị cũ (bug đổi màn không sạch).
+  manifest_ = TrackManifest{};
   load_manifest(doc, manifest_);
 
   Image decoded = LoadImage(manifest_.image_path.c_str());

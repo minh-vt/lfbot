@@ -44,15 +44,13 @@ void test_line_offset() {
 
 void test_steer() {
   using namespace lf::drive;
-  const Tuning cfg;
-  // heading = 0 → thuần P: lệch phải → lái dương.
-  CHECK(steer_to_line(0.2f, 0.0f, 10.0f, cfg) > 0.0f);
-  // Gain-scheduling: cùng error, v nhỏ hơn → |steer| lớn hơn (kp ∝ 1/v²).
-  const float slow = steer_to_line(0.05f, 0.0f, 5.0f, cfg);
-  const float fast = steer_to_line(0.05f, 0.0f, 20.0f, cfg);
-  CHECK(std::abs(slow) > std::abs(fast));
-  // Damping: heading cùng dấu error → lái mạnh hơn (thêm term ψ).
-  CHECK(steer_to_line(0.01f, 0.005f, 10.0f, cfg) > steer_to_line(0.01f, 0.0f, 10.0f, cfg));
+  CHECK(steer_to_line(0.2f, 0.0f) > 0.0f);   // lệch phải → lái phải
+  CHECK(steer_to_line(-0.2f, 0.0f) < 0.0f);  // lệch trái → lái trái
+  // Damping: heading cùng dấu error → lái mạnh hơn.
+  CHECK(steer_to_line(0.01f, 0.005f) > steer_to_line(0.01f, 0.0f));
+  // Bão hòa ở ±1.
+  CHECK(near(steer_to_line(10.0f, 0.0f), 1.0f));
+  CHECK(near(steer_to_line(-10.0f, 0.0f), -1.0f));
 }
 
 void test_avoid() {
@@ -136,12 +134,12 @@ void test_step_finish() {
 void test_plan_speed() {
   using namespace lf::drive;
   RacePlan plan;
-  record(plan, 0.0f, 0.0f, 0.0f);
-  record(plan, 1.0f, 0.0f, 0.0f);
-  // cua: giữ steer lớn vài tick để line_curve (low-pass) đủ lớn
-  record(plan, 2.0f, 1.0f, 0.0f);
-  record(plan, 3.0f, 1.0f, 0.0f);
-  record(plan, 4.0f, 1.0f, 0.0f);
+  record(plan, 0.0f, 0.0f, 1.0f, 0.0f);
+  record(plan, 1.0f, 0.0f, 1.0f, 0.0f);
+  // thẳng nhanh (speed 1.0) rồi cua chậm (speed 0.2) -> backward-pass giảm ga trước cua.
+  record(plan, 2.0f, 0.0f, 0.2f, 0.0f);
+  record(plan, 3.0f, 0.0f, 0.2f, 0.0f);
+  record(plan, 4.0f, 0.0f, 0.2f, 0.0f);
   Tuning cfg;
   cfg.robot.speed_limit_table = SpeedLimitTable{};
   cfg.robot.speed_limit_table.add(0.0f, 1.0f);
@@ -179,12 +177,11 @@ void test_estimate_line() {
   Readings frame;
   frame.line_offset = 0.5f;
   frame.line_certainty = 1.0f;
-  const RacePlan plan;  // rỗng → offset_at trả 0 (không rẽ nhánh)
+  const RacePlan plan;  // rỗng → lateral_at trả 0
   const Tuning cfg;
   DriveState next;
   float offset = 0.0f;
   for (int i = 0; i < 400; ++i) {
-    next.prev_line_estimate = next.line_estimate;
     offset = estimate_line(frame, next, plan, 0.0f, 0.01f, cfg).offset;
   }
   CHECK(near(next.line_estimate, 0.5f, 1e-2f));  // hội tụ về offset sensor

@@ -3,6 +3,7 @@
 #include <raylib.h>
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 #include "drive/types.hpp"
@@ -18,7 +19,6 @@ struct TracePoint {
   float v = 0.0f;
   float line_offset = 0.0f;
   float line_certainty = 0.0f;
-  float path_steer = 0.0f;
   float left_duty = 0.0f;
   float right_duty = 0.0f;
   float tof_front = 300.0f;
@@ -39,7 +39,6 @@ struct RenderFrame {
   float y = 0.0f;
   float theta = 0.0f;
   float v = 0.0f;
-  float path_steer = 0.0f;
   float line_offset = 0.0f;
   float line_certainty = 0.0f;
   float tof_front = 300.0f;
@@ -76,7 +75,7 @@ public:
 
   // Cập nhật mượt mà camera
   void update_camera(float rx, float ry, float theta, float v, float dt,
-                     const TrackManifest& manifest);
+                     const TrackManifest& manifest, bool snap);
 
   // Vẽ toàn bộ thế giới và telemetry HUD.
   void draw(const TrackManifest& manifest, const RenderFrame& frame,
@@ -93,17 +92,19 @@ public:
 
 private:
   void draw_world(const TrackManifest& manifest, const RenderFrame& frame,
-                  const lf::drive::RacePlan& plan, const std::vector<TracePoint>& run1_trace,
-                  const std::vector<TracePoint>& run2_trace);
-  static void draw_chassis(float rx, float ry, float theta, float path_steer, float curvature,
-                           float speed_limit, const std::array<float, 8>& ir_weights, float d_front,
-                           float d_left, float d_right);
+                  const std::vector<TracePoint>& run1_trace);
+  static void draw_chassis(float rx, float ry, float theta, float curvature, float speed_limit,
+                           const std::array<float, 8>& ir_weights, float d_front, float d_left,
+                           float d_right);
   static void draw_predictive_arc(float rx, float ry, float theta, float curvature,
                                   float speed_limit);
   static void draw_ghost_chassis(float rx, float ry, float theta);
-  static void draw_trail_run1(const std::vector<TracePoint>& trace,
-                              const lf::drive::RacePlan& plan);
-  static void draw_trail_run2(const std::vector<TracePoint>& trace);
+
+  // Bake quỹ đạo vào texture (chỉ vẽ điểm MỚI mỗi frame, blit 1 lệnh).
+  void bake_trails(const std::vector<TracePoint>& run1_trace,
+                   const std::vector<TracePoint>& run2_trace, const lf::drive::RacePlan& plan);
+  void bake_segments(const std::vector<TracePoint>& trace, std::size_t& count, bool heatmap,
+                     bool is_run1);
 
   void draw_hud(const TrackManifest& manifest, const RenderFrame& frame) const;
   void draw_top_dock(const TrackManifest& manifest, const RenderFrame& frame) const;
@@ -114,6 +115,14 @@ private:
   bool chase_camera_ = true;
   Vector2 smooth_target_{};
   float overview_scale_ = 1.0f;
+
+  // Texture quỹ đạo (world-space, 1 px = 1/trail_scale_ mm) + trạng thái đã bake.
+  RenderTexture2D trail_rt_{};
+  Camera2D trail_cam_{};
+  float trail_scale_ = 1.0f;
+  std::size_t baked_run1_ = 0;
+  std::size_t baked_run2_ = 0;
+  bool baked_ready_ = false;
 };
 
 }  // namespace lf::sim

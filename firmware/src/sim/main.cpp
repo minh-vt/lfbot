@@ -13,6 +13,7 @@
 #include "speed_limit_calibration.hpp"
 #include "track_asset.hpp"
 #include "track_rules.hpp"
+#include "tuning_config.hpp"
 #include "world_physics.hpp"
 
 namespace {
@@ -31,28 +32,17 @@ struct MissionRun {
   float run2_time = 0.0f;
 };
 
-bool load_tuning_config(const char* path, lf::drive::Tuning& tuning) {
-  std::ifstream file(path);
-  if (!file.is_open()) {
-    return false;
-  }
-  try {
-    nlohmann::json doc = nlohmann::json::parse(file);
-    if (doc.contains("robot")) {
-      const auto& r = doc.at("robot");
-      tuning.robot.bandwidth = r.value("bandwidth", tuning.robot.bandwidth);
-      tuning.robot.damping = r.value("damping", tuning.robot.damping);
-    }
-    if (doc.contains("track")) {
-      const auto& t = doc.at("track");
-      tuning.track.brake_limit = t.value("brake_limit", tuning.track.brake_limit);
-      tuning.track.obstacle_window = t.value("obstacle_window", tuning.track.obstacle_window);
-      tuning.track.sprint_margin = t.value("sprint_margin", tuning.track.sprint_margin);
-    }
-    return true;
-  } catch (const nlohmann::json::exception&) {
-    return false;
-  }
+// Điền các trường lấy từ vật lý (dùng chung cho trace đã ghi + trace live).
+void fill_world_fields(lf::sim::TracePoint& pt, const lf::sim::WorldPhysics& world, float elapsed) {
+  pt.x = world.x();
+  pt.y = world.y();
+  pt.theta = world.theta();
+  pt.v = world.v();
+  pt.tof_front = world.tof_front();
+  pt.tof_left = world.tof_left();
+  pt.tof_right = world.tof_right();
+  pt.ir_weights = world.ir_weights();
+  pt.elapsed_s = elapsed;
 }
 
 // Một tick vật lý + điều khiển (TrackRules phán quyết hoàn thành / vi phạm).
@@ -70,31 +60,23 @@ void advance_run(MissionRun& mission, lf::sim::WorldPhysics& world, lf::sim::Tra
 
   const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
   if (mission.mode == lf::drive::RunMode::kRun1) {
-    lf::drive::record(plan, tick, result.path_steer, frame.obstacle_side);
+    lf::drive::record(plan, tick, result.state.line_estimate, result.state.run1_speed,
+                      frame.obstacle_side);
   }
   world.step(result.command, dt);
   rules.check(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, dt);
 
   // Thu thập trace point
   lf::sim::TracePoint pt;
-  pt.x = world.x();
-  pt.y = world.y();
-  pt.theta = world.theta();
-  pt.v = world.v();
+  fill_world_fields(pt, world, mission.elapsed);
   pt.line_offset = frame.line_offset;
   pt.line_certainty = frame.line_certainty;
-  pt.path_steer = result.path_steer;
   pt.left_duty = result.command.left_duty;
   pt.right_duty = result.command.right_duty;
-  pt.tof_front = world.tof_front();
-  pt.tof_left = world.tof_left();
-  pt.tof_right = world.tof_right();
-  pt.elapsed_s = mission.elapsed;
   pt.tick = tick;
   pt.speed_limit = plan.ready ? plan.speed_limit_at(tick) : 1.0f;
   pt.obstacle_side = plan.ready ? plan.obstacle_at(tick) : frame.obstacle_side;
-  pt.line_curve_val = plan.ready ? plan.line_curve_at(tick) : result.path_steer;
-  pt.ir_weights = world.ir_weights();
+  pt.line_curve_val = plan.ready ? plan.speed_profile_at(tick) : result.path_steer;
 
   if (mission.mode == lf::drive::RunMode::kRun1) {
     run1_trace.push_back(pt);
@@ -122,6 +104,7 @@ void advance_run(MissionRun& mission, lf::sim::WorldPhysics& world, lf::sim::Tra
     world.reset(track.manifest());
     rules.reset(track.manifest());
     state = {};
+    state.line_estimate = plan.lateral_at(0.0f);  // Run 2 khớp setpoint ngay (tránh cú giật)
     mission.elapsed = 0.0f;
     mission.mode = lf::drive::RunMode::kRun2;
   } else if (mission.mode == lf::drive::RunMode::kRun2 && verdict.completed) {
@@ -277,7 +260,6 @@ lf::sim::RenderFrame to_render_frame(const MissionRun& mission, const lf::sim::T
   frame.y = pt.y;
   frame.theta = pt.theta;
   frame.v = pt.v;
-  frame.path_steer = pt.path_steer;
   frame.curvature = pt.line_curve_val;
   frame.speed_limit = pt.speed_limit;
   frame.line_offset = pt.line_offset;
@@ -294,15 +276,7 @@ lf::sim::RenderFrame to_render_frame(const MissionRun& mission, const lf::sim::T
 
 lf::sim::TracePoint make_live_trace_point(const lf::sim::WorldPhysics& world, float elapsed) {
   lf::sim::TracePoint pt;
-  pt.x = world.x();
-  pt.y = world.y();
-  pt.theta = world.theta();
-  pt.v = world.v();
-  pt.tof_front = world.tof_front();
-  pt.tof_left = world.tof_left();
-  pt.tof_right = world.tof_right();
-  pt.ir_weights = world.ir_weights();
-  pt.elapsed_s = elapsed;
+  fill_world_fields(pt, world, elapsed);
   return pt;
 }
 
@@ -324,7 +298,7 @@ int main() {
   rules.reset(track.manifest());
 
   drive::Tuning cfg;
-  load_tuning_config(kTuningPath, cfg);
+  lf::sim::load_tuning_config(kTuningPath, cfg);
   // Hình học không-thứ-nguyên suy trực tiếp từ layout SSoT (không qua JSON).
   cfg.robot.geometry_l = sensing::geometry_l(sensing::kRobotLayout);
   cfg.robot.geometry_s = sensing::geometry_s(sensing::kRobotLayout);
@@ -352,7 +326,7 @@ int main() {
     const float dt = raw_dt * playback_speed;
 
     if (IsKeyPressed(KEY_U)) {
-      load_tuning_config(kTuningPath, cfg);
+      lf::sim::load_tuning_config(kTuningPath, cfg);
     }
 
     poll_keyboard_input(track_idx, track, world, rules, state, plan, mission, run1_trace,
@@ -380,8 +354,8 @@ int main() {
                                                      playback_speed, scrub_frame, total_frames);
 
     // Cập nhật camera
-    renderer.update_camera(r_frame.x, r_frame.y, r_frame.theta, r_frame.v, raw_dt,
-                           track.manifest());
+    renderer.update_camera(r_frame.x, r_frame.y, r_frame.theta, r_frame.v, raw_dt, track.manifest(),
+                           r_frame.scrub_frame >= 0);
 
     // Vẽ frame
     sim::Renderer::begin_frame();

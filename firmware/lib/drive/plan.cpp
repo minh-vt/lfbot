@@ -42,24 +42,16 @@ void dilate_obstacle_side(RacePlan& plan, const Tuning& cfg) {
   }
 }
 
-// Backward-pass tick-space: speed_limit(t) = min(speed_limit(line_curve(t)),
-// speed_limit(t+1)+brake).
+// Backward-pass tick-space: envelope Run 2 = tốc độ ĐÃ ĐẠT ở Run 1 (feasible-by-construction)
+// × sprint_boost, chặn bởi giới hạn phanh phi-cục-bộ (khớp tick với tick+1).
 void plan_speed_pass(RacePlan& plan, const Tuning& cfg) {
   float next = 1.0f;
   for (std::size_t i = plan.length; i > 0; --i) {
     const std::size_t index = i - 1;
-    const float grip = cfg.robot.speed_limit(plan.line_curve[index]);
-    const float capped = std::min(grip, next + cfg.track.brake_limit);
+    const float sprint = plan.speed_profile[index] * cfg.track.sprint_margin;
+    const float capped = std::min(sprint, next + cfg.track.brake_limit);
     plan.speed_limit[index] = std::max(0.0f, capped);
     next = plan.speed_limit[index];
-  }
-}
-
-// Racing-line offset (ticket 25): cắt trong cua = nửa span (geometry, không gain tay).
-void plan_offset_pass(RacePlan& plan) {
-  constexpr float kRacingLineOffset = 0.0f;  // placeholder ticket 25 tạm tắt
-  for (std::size_t i = 0; i < plan.length; ++i) {
-    plan.offset_setpoint[i] = -kRacingLineOffset * plan.line_curve[i];
   }
 }
 
@@ -68,8 +60,12 @@ void plan_offset_pass(RacePlan& plan) {
 // Truy cập plan trả giá trị TRUNG TÍNH khi chưa ready (đang ghi hoặc chưa plan):
 // feedforward/setpoint/obstacle → 0; speed_limit → 1 (không chặn). Nhờ vậy step()
 // không cần rẽ nhánh `plan.ready` cho setpoint/feedforward.
-float RacePlan::line_curve_at(float tick) const {
-  return ready ? interp(line_curve.data(), length, tick) : 0.0f;
+float RacePlan::speed_profile_at(float tick) const {
+  return ready ? interp(speed_profile.data(), length, tick) : 0.0f;
+}
+
+float RacePlan::lateral_at(float tick) const {
+  return ready ? interp(lateral_profile.data(), length, tick) : 0.0f;
 }
 
 float RacePlan::obstacle_at(float tick) const {
@@ -80,11 +76,7 @@ float RacePlan::speed_limit_at(float tick) const {
   return ready ? interp(speed_limit.data(), length, tick) : 1.0f;
 }
 
-float RacePlan::offset_at(float tick) const {
-  return ready ? interp(offset_setpoint.data(), length, tick) : 0.0f;
-}
-
-void record(RacePlan& plan, float tick, float steer, float obstacle_side) {
+void record(RacePlan& plan, float tick, float lateral, float speed, float obstacle_side) {
   if (tick < 0.0f) {
     return;
   }
@@ -94,15 +86,17 @@ void record(RacePlan& plan, float tick, float steer, float obstacle_side) {
   }
   // Điền khoảng trống bằng giá trị trước đó.
   const float prev_side = (plan.length > 0) ? plan.obstacle_side[plan.length - 1] : 0.0f;
-  const float prev_curve = (plan.length > 0) ? plan.line_curve[plan.length - 1] : 0.0f;
+  const float prev_speed = (plan.length > 0) ? plan.speed_profile[plan.length - 1] : 0.0f;
+  const float prev_lateral = (plan.length > 0) ? plan.lateral_profile[plan.length - 1] : 0.0f;
   for (std::size_t i = plan.length; i < index; ++i) {
     plan.obstacle_side[i] = prev_side;
-    plan.line_curve[i] = prev_curve;
+    plan.speed_profile[i] = prev_speed;
+    plan.lateral_profile[i] = prev_lateral;
   }
-  // line_curve = geometry thuần (low-pass tín hiệu lái, bỏ nhiễu PD).
-  constexpr float kCurveSmoothing = 0.3f;
+  // speed_profile = tốc độ đã đạt; lateral_profile = vị trí ngang đã đạt (setpoint Run 2).
   plan.obstacle_side[index] = obstacle_side;
-  plan.line_curve[index] = kCurveSmoothing * steer + (1.0f - kCurveSmoothing) * prev_curve;
+  plan.speed_profile[index] = speed;
+  plan.lateral_profile[index] = lateral;
   plan.length = std::max(plan.length, index + 1);
 }
 
@@ -112,7 +106,6 @@ void plan_speed(RacePlan& plan, const Tuning& cfg) {
   }
   dilate_obstacle_side(plan, cfg);
   plan_speed_pass(plan, cfg);
-  plan_offset_pass(plan);
   plan.ready = true;
 }
 

@@ -53,6 +53,15 @@ struct RobotLayout {
   return ir_half_span_mm(layout) / layout.tick_length_mm;
 }
 
+// Điểm tham chiếu dọc của thanh IR (trung bình forward) — cho kim lái / ghost.
+[[nodiscard]] constexpr float ir_forward_reference_mm(const RobotLayout& layout) {
+  float sum = 0.0f;
+  for (const float forward : layout.ir_forward_mm) {
+    sum += forward;
+  }
+  return sum / static_cast<float>(layout.ir_forward_mm.size());
+}
+
 // Layout hiện tại của robot — nguồn chân lý duy nhất trong repo.
 inline constexpr RobotLayout kRobotLayout{};
 

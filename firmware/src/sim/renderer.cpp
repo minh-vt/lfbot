@@ -17,13 +17,25 @@ namespace {
 // Layout robot hiện tại (SSoT) — renderer đọc hình học từ đây.
 constexpr sensing::RobotLayout kLayout = sensing::kRobotLayout;
 
-// Điểm tham chiếu của thanh IR (trung bình forward) — dùng cho kim lái.
-float ir_forward_reference(const sensing::RobotLayout& layout) {
-  float sum = 0.0f;
-  for (const float forward : layout.ir_forward_mm) {
-    sum += forward;
-  }
-  return sum / static_cast<float>(layout.ir_forward_mm.size());
+// 4 góc khung xe tại (rx, ry, theta) — dùng chung cho xe chính + ghost.
+struct ChassisQuad {
+  Vector2 front_left;
+  Vector2 front_right;
+  Vector2 rear_right;
+  Vector2 rear_left;
+};
+
+ChassisQuad chassis_corners(float rx, float ry, float theta) {
+  const float cos_t = std::cos(theta);
+  const float sin_t = std::sin(theta);
+  const float hl = kLayout.half_length_mm;
+  const float hw = kLayout.half_width_mm;
+  return {
+    {rx + hl * cos_t - hw * sin_t, ry + hl * sin_t + hw * cos_t},
+    {rx + hl * cos_t + hw * sin_t, ry + hl * sin_t - hw * cos_t},
+    {rx - hl * cos_t + hw * sin_t, ry - hl * sin_t - hw * cos_t},
+    {rx - hl * cos_t - hw * sin_t, ry - hl * sin_t + hw * cos_t},
+  };
 }
 
 constexpr int kDefaultWinW = 1920;
@@ -58,9 +70,8 @@ const char* run_mode_name(int mode) {
   }
 }
 
-void draw_text_bold(const char* text, int x, int y, int size, Color color) {
+void draw_hud_text(const char* text, int x, int y, int size, Color color) {
   DrawText(text, x, y, size, color);
-  DrawText(text, x + 1, y, size, color);
 }
 
 }  // namespace
@@ -93,11 +104,28 @@ void Renderer::reload_track(const TrackManifest& manifest) {
   camera_.offset = Vector2{screen_w * 0.5f, screen_h * 0.5f};
   camera_.rotation = 0.0f;
   camera_.zoom = chase_camera_ ? 1.6f : overview_scale_;
+
+  // Texture quỹ đạo theo hệ world (mm), giới hạn cạnh <= 4096 px cho an toàn GPU.
+  if (trail_rt_.id != 0) {
+    UnloadRenderTexture(trail_rt_);
+  }
+  constexpr float kMaxTrailTexPx = 4096.0f;
+  trail_scale_ = std::min(
+    {1.0f, kMaxTrailTexPx / manifest.arena_width_mm, kMaxTrailTexPx / manifest.arena_height_mm});
+  trail_rt_ = LoadRenderTexture(static_cast<int>(manifest.arena_width_mm * trail_scale_),
+                                static_cast<int>(manifest.arena_height_mm * trail_scale_));
+  trail_cam_ = Camera2D{Vector2{0.0f, 0.0f}, Vector2{0.0f, 0.0f}, 0.0f, trail_scale_};
+  baked_run1_ = 0;
+  baked_run2_ = 0;
+  baked_ready_ = false;
 }
 
 void Renderer::shutdown() {
   if (texture_.id != 0) {
     UnloadTexture(texture_);
+  }
+  if (trail_rt_.id != 0) {
+    UnloadRenderTexture(trail_rt_);
   }
   CloseWindow();
 }
@@ -119,7 +147,7 @@ void Renderer::toggle_camera_mode() {
 }
 
 void Renderer::update_camera(float rx, float ry, float theta, float v, float dt,
-                             const TrackManifest& manifest) {
+                             const TrackManifest& manifest, bool snap) {
   const auto screen_w = static_cast<float>(GetScreenWidth());
   const auto screen_h = static_cast<float>(GetScreenHeight());
   const float dock_total_h = 7.8f * root_rem(screen_h);
@@ -133,8 +161,12 @@ void Renderer::update_camera(float rx, float ry, float theta, float v, float dt,
     const float target_y = ry + std::sin(theta) * lookahead;
 
     const float alpha = std::clamp(dt * 7.0f, 0.0f, 1.0f);
-    smooth_target_.x += (target_x - smooth_target_.x) * alpha;
-    smooth_target_.y += (target_y - smooth_target_.y) * alpha;
+    if (snap) {
+      smooth_target_ = Vector2{target_x, target_y};  // tua frame → nhảy thẳng, không lag
+    } else {
+      smooth_target_.x += (target_x - smooth_target_.x) * alpha;
+      smooth_target_.y += (target_y - smooth_target_.y) * alpha;
+    }
 
     camera_.target = smooth_target_;
     camera_.offset = Vector2{screen_w * 0.5f, screen_h * 0.5f};
@@ -147,32 +179,23 @@ void Renderer::update_camera(float rx, float ry, float theta, float v, float dt,
 }
 
 void Renderer::draw_ghost_chassis(float rx, float ry, float theta) {
-  const float cos_t = std::cos(theta);
-  const float sin_t = std::sin(theta);
   const float hl = kLayout.half_length_mm;
   const float hw = kLayout.half_width_mm;
-
-  const Vector2 p1 = {rx + hl * cos_t - hw * sin_t, ry + hl * sin_t + hw * cos_t};
-  const Vector2 p2 = {rx + hl * cos_t + hw * sin_t, ry + hl * sin_t - hw * cos_t};
-  const Vector2 p3 = {rx - hl * cos_t + hw * sin_t, ry - hl * sin_t - hw * cos_t};
-  const Vector2 p4 = {rx - hl * cos_t - hw * sin_t, ry - hl * sin_t + hw * cos_t};
+  const ChassisQuad q = chassis_corners(rx, ry, theta);
 
   DrawRectanglePro(Rectangle{rx, ry, hl * 2.0f, hw * 2.0f}, Vector2{hl, hw}, theta * 180.0f / kPi,
                    Color{39, 39, 42, 60});
-  DrawLineEx(p1, p2, 1.8f, Color{113, 113, 122, 100});
-  DrawLineEx(p2, p3, 1.8f, Color{113, 113, 122, 100});
-  DrawLineEx(p3, p4, 1.8f, Color{113, 113, 122, 100});
-  DrawLineEx(p4, p1, 1.8f, Color{113, 113, 122, 100});
+  DrawLineEx(q.front_left, q.front_right, 1.8f, Color{113, 113, 122, 100});
+  DrawLineEx(q.front_right, q.rear_right, 1.8f, Color{113, 113, 122, 100});
+  DrawLineEx(q.rear_right, q.rear_left, 1.8f, Color{113, 113, 122, 100});
+  DrawLineEx(q.rear_left, q.front_left, 1.8f, Color{113, 113, 122, 100});
 }
 
-void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, float curvature,
-                            float speed_limit, const std::array<float, 8>& ir_weights,
-                            float d_front, float d_left, float d_right) {
+void Renderer::draw_chassis(float rx, float ry, float theta, float curvature, float speed_limit,
+                            const std::array<float, 8>& ir_weights, float d_front, float d_left,
+                            float d_right) {
   const float cos_t = std::cos(theta);
   const float sin_t = std::sin(theta);
-  const float ir_fwd = ir_forward_reference(kLayout);
-  const float front_x = rx + ir_fwd * cos_t;
-  const float front_y = ry + ir_fwd * sin_t;
   const float perp_x = -sin_t;
   const float perp_y = cos_t;
 
@@ -221,17 +244,14 @@ void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, f
   draw_cone(pos_right, theta + side_angle, d_right, kToFRightCol);
 
   // Khung xe 145x138mm
-  const Vector2 p1 = {rx + hl * cos_t - hw * sin_t, ry + hl * sin_t + hw * cos_t};
-  const Vector2 p2 = {rx + hl * cos_t + hw * sin_t, ry + hl * sin_t - hw * cos_t};
-  const Vector2 p3 = {rx - hl * cos_t + hw * sin_t, ry - hl * sin_t - hw * cos_t};
-  const Vector2 p4 = {rx - hl * cos_t - hw * sin_t, ry - hl * sin_t + hw * cos_t};
+  const ChassisQuad quad = chassis_corners(rx, ry, theta);
 
   DrawRectanglePro(Rectangle{rx, ry, hl * 2.0f, hw * 2.0f}, Vector2{hl, hw}, theta * 180.0f / kPi,
                    Color{24, 24, 27, 240});
-  DrawLineEx(p1, p2, 1.8f, Color{244, 244, 245, 230});
-  DrawLineEx(p2, p3, 1.8f, Color{244, 244, 245, 230});
-  DrawLineEx(p3, p4, 1.8f, Color{244, 244, 245, 230});
-  DrawLineEx(p4, p1, 1.8f, Color{244, 244, 245, 230});
+  DrawLineEx(quad.front_left, quad.front_right, 1.8f, Color{244, 244, 245, 230});
+  DrawLineEx(quad.front_right, quad.rear_right, 1.8f, Color{244, 244, 245, 230});
+  DrawLineEx(quad.rear_right, quad.rear_left, 1.8f, Color{244, 244, 245, 230});
+  DrawLineEx(quad.rear_left, quad.front_left, 1.8f, Color{244, 244, 245, 230});
 
   // 8 Mắt IR micro-LED (vị trí từng mắt lấy từ layout)
   for (std::size_t i = 0; i < kLayout.ir_lateral_mm.size(); ++i) {
@@ -248,17 +268,7 @@ void Renderer::draw_chassis(float rx, float ry, float theta, float path_steer, f
     }
   }
 
-  // Véc-tơ lái path_steer
-  const float steer_angle = theta + path_steer * 0.45f;
-  constexpr float kNeedleLen = 42.0f;
-  const Vector2 needle_tip = {
-    front_x + kNeedleLen * std::cos(steer_angle),
-    front_y + kNeedleLen * std::sin(steer_angle),
-  };
-  DrawLineEx(Vector2{front_x, front_y}, needle_tip, 2.0f, Color{250, 250, 250, 220});
-  DrawCircleV(needle_tip, 2.5f, Color{250, 250, 250, 220});
-
-  // Predictive Arc (ticket 32): cung quỹ đạo theo κ (geometry thuần).
+  // Chỉ báo hướng DUY NHẤT: Predictive Arc (ticket 32) — cung quỹ đạo theo κ.
   draw_predictive_arc(rx, ry, theta, curvature, speed_limit);
 }
 
@@ -267,7 +277,7 @@ void Renderer::draw_predictive_arc(float rx, float ry, float theta, float curvat
                                    float speed_limit) {
   const float abs_k = std::abs(curvature);
   if (abs_k < 1e-3f) {
-    return;  // thẳng → kim path_steer đã đủ
+    return;  // thẳng → không cần cung
   }
   const Color col = (speed_limit < 0.7f) ? Color{245, 158, 11, 220} : Color{56, 189, 248, 180};
   const float kappa_mm = 2.0f * abs_k / kLayout.wheelbase_mm;  // 1/mm
@@ -289,70 +299,75 @@ void Renderer::draw_predictive_arc(float rx, float ry, float theta, float curvat
   }
 }
 
-void Renderer::draw_trail_run1(const std::vector<TracePoint>& trace,
-                               const lf::drive::RacePlan& plan) {
-  if (trace.size() < 2) {
+// Bake quỹ đạo vào texture world-space. Chỉ vẽ các điểm MỚI mỗi frame; khi plan chuyển
+// ready (đổi màu heatmap) hoặc trace bị reset (đổi màn / R) thì vẽ lại từ đầu.
+void Renderer::bake_trails(const std::vector<TracePoint>& run1_trace,
+                           const std::vector<TracePoint>& run2_trace,
+                           const lf::drive::RacePlan& plan) {
+  if (trail_rt_.id == 0) {
     return;
   }
-  const bool has_plan = plan.ready;
-  constexpr float kMinDistSq = 15.0f * 15.0f;
-
-  std::size_t prev_idx = 0;
-  for (std::size_t i = 1; i < trace.size(); ++i) {
-    const float dx = trace[i].x - trace[prev_idx].x;
-    const float dy = trace[i].y - trace[prev_idx].y;
-    const bool is_last = (i == trace.size() - 1);
-    if (dx * dx + dy * dy < kMinDistSq && !is_last) {
-      continue;
-    }
-    const Vector2 p1 = {trace[prev_idx].x, trace[prev_idx].y};
-    const Vector2 p2 = {trace[i].x, trace[i].y};
-
-    if (has_plan) {
-      // Heatmap Ribbon: Tốc độ cao = trắng, giảm tốc backward-pass = xám tối
-      const float speed = std::clamp(trace[prev_idx].speed_limit, 0.2f, 1.0f);
-      const auto intensity = static_cast<unsigned char>(60.0f + (speed - 0.2f) * (190.0f / 0.8f));
-      const Color col = {intensity, intensity, intensity, 220};
-      DrawLineEx(p1, p2, 3.2f, col);
-
-      if (std::abs(trace[prev_idx].obstacle_side) > 0.05f) {
-        DrawCircleV(p1, 2.0f, Color{245, 158, 11, 140});
-      }
-      // Curvature Ribbon (ticket 32): chấm Apex tại cua gắt.
-      if (std::abs(trace[prev_idx].line_curve_val) >= 0.3f) {
-        DrawCircleV(p1, 3.0f, Color{245, 158, 11, 200});
-      }
-    } else {
-      DrawLineEx(p1, p2, 2.0f, Color{113, 113, 122, 110});
-    }
-    prev_idx = i;
+  const bool reset = (run1_trace.size() < baked_run1_) || (run2_trace.size() < baked_run2_) ||
+                     (plan.ready != baked_ready_);
+  if (reset) {
+    BeginTextureMode(trail_rt_);
+    ClearBackground(BLANK);
+    EndTextureMode();
+    baked_run1_ = 0;
+    baked_run2_ = 0;
+    baked_ready_ = plan.ready;
+  }
+  if (run1_trace.size() > baked_run1_) {
+    bake_segments(run1_trace, baked_run1_, plan.ready, true);
+  }
+  if (run2_trace.size() > baked_run2_) {
+    bake_segments(run2_trace, baked_run2_, false, false);
   }
 }
 
-void Renderer::draw_trail_run2(const std::vector<TracePoint>& trace) {
-  if (trace.size() < 2) {
-    return;
-  }
+void Renderer::bake_segments(const std::vector<TracePoint>& trace, std::size_t& count, bool heatmap,
+                             bool is_run1) {
   constexpr float kMinDistSq = 15.0f * 15.0f;
-  std::size_t prev_idx = 0;
-  for (std::size_t i = 1; i < trace.size(); ++i) {
-    const float dx = trace[i].x - trace[prev_idx].x;
-    const float dy = trace[i].y - trace[prev_idx].y;
-    const bool is_last = (i == trace.size() - 1);
+  std::size_t prev = (count == 0) ? 0 : count - 1;
+  const std::size_t start = (count == 0) ? 1 : count;
+
+  BeginTextureMode(trail_rt_);
+  BeginMode2D(trail_cam_);
+  for (std::size_t i = start; i < trace.size(); ++i) {
+    const float dx = trace[i].x - trace[prev].x;
+    const float dy = trace[i].y - trace[prev].y;
+    const bool is_last = (i + 1 == trace.size());
     if (dx * dx + dy * dy < kMinDistSq && !is_last) {
       continue;
     }
-    const Vector2 p1 = {trace[prev_idx].x, trace[prev_idx].y};
+    const Vector2 p1 = {trace[prev].x, trace[prev].y};
     const Vector2 p2 = {trace[i].x, trace[i].y};
-    DrawLineEx(p1, p2, 2.5f, Color{250, 250, 250, 230});
-    prev_idx = i;
+
+    if (heatmap) {
+      // Heatmap Ribbon: Tốc độ cao = trắng, giảm tốc backward-pass = xám tối
+      const float speed = std::clamp(trace[prev].speed_limit, 0.2f, 1.0f);
+      const auto intensity = static_cast<unsigned char>(60.0f + (speed - 0.2f) * (190.0f / 0.8f));
+      DrawLineEx(p1, p2, 3.2f, Color{intensity, intensity, intensity, 220});
+      if (std::abs(trace[prev].obstacle_side) > 0.05f) {
+        DrawCircleV(p1, 2.0f, Color{245, 158, 11, 140});
+      }
+      if (std::abs(trace[prev].line_curve_val) >= 0.3f) {  // Curvature Ribbon: chấm Apex
+        DrawCircleV(p1, 3.0f, Color{245, 158, 11, 200});
+      }
+    } else if (is_run1) {
+      DrawLineEx(p1, p2, 2.0f, Color{113, 113, 122, 110});
+    } else {
+      DrawLineEx(p1, p2, 2.5f, Color{250, 250, 250, 230});
+    }
+    prev = i;
   }
+  EndMode2D();
+  EndTextureMode();
+  count = trace.size();
 }
 
 void Renderer::draw_world(const TrackManifest& manifest, const RenderFrame& frame,
-                          const lf::drive::RacePlan& plan,
-                          const std::vector<TracePoint>& run1_trace,
-                          const std::vector<TracePoint>& run2_trace) {
+                          const std::vector<TracePoint>& run1_trace) {
   DrawTexture(texture_, 0, 0, WHITE);
 
   DrawRectangleLinesEx(Rectangle{0.0f, 0.0f, manifest.arena_width_mm, manifest.arena_height_mm},
@@ -380,9 +395,17 @@ void Renderer::draw_world(const TrackManifest& manifest, const RenderFrame& fram
     DrawRectangleLinesEx(obs_rec, 2.0f, kAmberAlert);
   }
 
-  // Quỹ đạo Run 1 & Run 2
-  draw_trail_run1(run1_trace, plan);
-  draw_trail_run2(run2_trace);
+  // Quỹ đạo Run 1 & Run 2 — đã bake vào texture, blit 1 lệnh (thay vì vẽ lại từng đoạn).
+  if (trail_rt_.id != 0) {
+    const Rectangle src{
+      0.0f,
+      0.0f,
+      static_cast<float>(trail_rt_.texture.width),
+      -static_cast<float>(trail_rt_.texture.height),
+    };  // -H: bù flip của FBO
+    const Rectangle dst{0.0f, 0.0f, manifest.arena_width_mm, manifest.arena_height_mm};
+    DrawTexturePro(trail_rt_.texture, src, dst, Vector2{0.0f, 0.0f}, 0.0f, WHITE);
+  }
 
   // Ghost Car Run 1 (khi đang ở Run 2 hoặc replay)
   if (frame.mode == 2 && !run1_trace.empty()) {
@@ -395,8 +418,8 @@ void Renderer::draw_world(const TrackManifest& manifest, const RenderFrame& fram
   }
 
   // Xe chính
-  draw_chassis(frame.x, frame.y, frame.theta, frame.path_steer, frame.curvature, frame.speed_limit,
-               frame.ir_weights, frame.tof_front, frame.tof_left, frame.tof_right);
+  draw_chassis(frame.x, frame.y, frame.theta, frame.curvature, frame.speed_limit, frame.ir_weights,
+               frame.tof_front, frame.tof_left, frame.tof_right);
 }
 
 void Renderer::draw_top_dock(const TrackManifest& manifest, const RenderFrame& frame) const {
@@ -415,7 +438,7 @@ void Renderer::draw_top_dock(const TrackManifest& manifest, const RenderFrame& f
 
   std::array<char, 128> text_buf{};
   (void)std::snprintf(text_buf.data(), text_buf.size(), "TRACK: %s", manifest.name.c_str());
-  draw_text_bold(text_buf.data(), pad, text_y, font_sz, kZincWhite);
+  draw_hud_text(text_buf.data(), pad, text_y, font_sz, kZincWhite);
 
   Color mode_color = kBorderGray;
   if (frame.mode == 2) {
@@ -425,29 +448,29 @@ void Renderer::draw_top_dock(const TrackManifest& manifest, const RenderFrame& f
   }
   const int mode_x = static_cast<int>(screen_w * 0.20f);
   (void)std::snprintf(text_buf.data(), text_buf.size(), "MODE: %s", run_mode_name(frame.mode));
-  draw_text_bold(text_buf.data(), mode_x, text_y, font_sz, mode_color);
+  draw_hud_text(text_buf.data(), mode_x, text_y, font_sz, mode_color);
 
   const int tel_x = static_cast<int>(screen_w * 0.40f);
   (void)std::snprintf(text_buf.data(), text_buf.size(), "t: %.2fs | v: %.2fm/s | cert: %.0f%%",
                       frame.elapsed_s, frame.v, frame.line_certainty * 100.0f);
-  draw_text_bold(text_buf.data(), tel_x, text_y, font_sz, kTextPrimary);
+  draw_hud_text(text_buf.data(), tel_x, text_y, font_sz, kTextPrimary);
 
   const char* cam_name = chase_camera_ ? "CHASE CAM" : "OVERVIEW";
   const char* play_state = frame.paused ? "PAUSED" : "RUNNING";
   const float r_m = (std::abs(frame.curvature) > 1e-3f)
                       ? (kLayout.wheelbase_mm / (2.0f * std::abs(frame.curvature))) / 1000.0f
                       : 999.0f;
-  const char* curve_tag = "THANG";
+  const char* curve_tag = "STRAIGHT";
   if (r_m <= 0.7f) {
-    curve_tag = "CUA GAT";
+    curve_tag = "TIGHT";
   } else if (r_m <= 2.0f) {
-    curve_tag = "CUA NHE";
+    curve_tag = "GENTLE";
   }
   (void)std::snprintf(text_buf.data(), text_buf.size(), "%s | %.2fx | %s  R=%.2fm [%s]", cam_name,
                       frame.playback_speed, play_state, r_m, curve_tag);
   const int cam_w = MeasureText(text_buf.data(), font_sz);
   const int cam_x = static_cast<int>(screen_w) - cam_w - pad;
-  draw_text_bold(text_buf.data(), cam_x, text_y, font_sz, frame.paused ? kAmberAlert : kTextMuted);
+  draw_hud_text(text_buf.data(), cam_x, text_y, font_sz, frame.paused ? kAmberAlert : kTextMuted);
 }
 
 void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
@@ -472,19 +495,19 @@ void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
     (frame.lap1_s > 0.0f && frame.lap2_s > 0.0f) ? (frame.lap2_s - frame.lap1_s) : 0.0f;
   (void)std::snprintf(text_buf.data(), text_buf.size(), "R1: %.2fs  R2: %.2fs  Δt: %+.2fs",
                       frame.lap1_s, frame.lap2_s, delta_t);
-  draw_text_bold(text_buf.data(), pad, text_y, font_sz, kZincWhite);
+  draw_hud_text(text_buf.data(), pad, text_y, font_sz, kZincWhite);
 
   // 2. Motor PWM Meters: Nhãn rõ ràng, hiển thị phần trăm và thanh bar
   const int duty_base_x = static_cast<int>(screen_w * 0.28f);
-  draw_text_bold("MOTOR:", duty_base_x, text_y, font_sz, kTextMuted);
+  draw_hud_text("MOTOR:", duty_base_x, text_y, font_sz, kTextMuted);
 
   const auto draw_motor_bar = [font_sz, rem](int x, int y, const char* label, float duty) {
-    draw_text_bold(label, x, y, font_sz, kZincWhite);
+    draw_hud_text(label, x, y, font_sz, kZincWhite);
     std::array<char, 16> pct_buf{};
     const int pct = static_cast<int>(duty * 100.0f);
     (void)std::snprintf(pct_buf.data(), pct_buf.size(), "%+3d%%", pct);
     const int pct_x = x + static_cast<int>(1.3f * rem);
-    draw_text_bold(pct_buf.data(), pct_x, y, font_sz, kTextPrimary);
+    draw_hud_text(pct_buf.data(), pct_x, y, font_sz, kTextPrimary);
 
     const int meter_w = static_cast<int>(3.9f * rem);
     const int meter_h = static_cast<int>(1.0f * rem);
@@ -511,20 +534,20 @@ void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
   // 3. Line Offset & Alert Badge (Font >= 32)
   const int status_x = static_cast<int>(screen_w * 0.55f);
   (void)std::snprintf(text_buf.data(), text_buf.size(), "Offset: %+.2f", frame.line_offset);
-  draw_text_bold(text_buf.data(), status_x, text_y, font_sz, kTextPrimary);
+  draw_hud_text(text_buf.data(), status_x, text_y, font_sz, kTextPrimary);
 
   const int badge_x = status_x + static_cast<int>(11.1f * rem);
   if (frame.dq) {
     if (frame.dq_reason != nullptr) {
       (void)std::snprintf(text_buf.data(), text_buf.size(), "[ DQ: %s ]", frame.dq_reason);
-      draw_text_bold(text_buf.data(), badge_x, text_y, font_sz, kAmberAlert);
+      draw_hud_text(text_buf.data(), badge_x, text_y, font_sz, kAmberAlert);
     } else {
-      draw_text_bold("[ DQ: INFRACTION ]", badge_x, text_y, font_sz, kAmberAlert);
+      draw_hud_text("[ DQ: INFRACTION ]", badge_x, text_y, font_sz, kAmberAlert);
     }
   } else if (frame.line_certainty < 0.25f) {
-    draw_text_bold("[ LINE UNCERTAIN ]", badge_x, text_y, font_sz, kAmberAlert);
+    draw_hud_text("[ LINE UNCERTAIN ]", badge_x, text_y, font_sz, kAmberAlert);
   } else {
-    draw_text_bold("[ TRACKING ]", badge_x, text_y, font_sz, Color{161, 161, 170, 255});
+    draw_hud_text("[ TRACKING ]", badge_x, text_y, font_sz, Color{161, 161, 170, 255});
   }
 
   // 4. Playback / Status info (Right aligned, Font >= 32)
@@ -546,7 +569,7 @@ void Renderer::draw_telemetry_dock(const RenderFrame& frame) {
   }
   const int status_w = MeasureText(status_buf.data(), font_sz);
   const int info_x = static_cast<int>(screen_w) - status_w - pad;
-  draw_text_bold(status_buf.data(), info_x, text_y, font_sz, status_col);
+  draw_hud_text(status_buf.data(), info_x, text_y, font_sz, status_col);
 }
 
 void Renderer::draw_hud(const TrackManifest& manifest, const RenderFrame& frame) const {
@@ -558,9 +581,10 @@ void Renderer::draw(const TrackManifest& manifest, const RenderFrame& frame,
                     const lf::drive::RacePlan& plan, const std::vector<TracePoint>& run1_trace,
                     const std::vector<TracePoint>& run2_trace) {
   ClearBackground(kBgCharcoal);
+  bake_trails(run1_trace, run2_trace, plan);  // cập nhật texture quỹ đạo (chỉ điểm mới)
 
   BeginMode2D(camera_);
-  draw_world(manifest, frame, plan, run1_trace, run2_trace);
+  draw_world(manifest, frame, run1_trace);
   EndMode2D();
 
   draw_hud(manifest, frame);

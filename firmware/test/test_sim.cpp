@@ -6,6 +6,7 @@
 #include "speed_limit_calibration.hpp"
 #include "track_asset.hpp"
 #include "track_rules.hpp"
+#include "tuning_config.hpp"
 #include "world_physics.hpp"
 
 namespace {
@@ -52,6 +53,7 @@ int main() {
   rules.reset(track.manifest());
 
   drive::Tuning cfg;
+  (void)sim::load_tuning_config("assets/tuning.json", cfg);  // GUI == test (loader chung)
   cfg.robot.geometry_l = sensing::geometry_l(sensing::kRobotLayout);
   cfg.robot.geometry_s = sensing::geometry_s(sensing::kRobotLayout);
   cfg.robot.speed_limit_table = sim::calibrate_speed_limit(
@@ -79,7 +81,8 @@ int main() {
     }
     if (mode == drive::RunMode::kRun1) {
       const float tick = 0.5f * (static_cast<float>(frame.enc_l) + static_cast<float>(frame.enc_r));
-      drive::record(plan, tick, result.path_steer, frame.obstacle_side);
+      drive::record(plan, tick, result.state.line_estimate, result.state.run1_speed,
+                    frame.obstacle_side);
     }
     world.step(result.command, kDt);
     rules.check(world.x(), world.y(), world.v(), frame.line_certainty > 0.5f, kDt);
@@ -102,6 +105,7 @@ int main() {
       world.reset(track.manifest());
       rules.reset(track.manifest());
       state = {};
+      state.line_estimate = plan.lateral_at(0.0f);  // khởi động Run 2 khớp setpoint (tránh cú giật)
       run_elapsed = 0.0f;
       mode = drive::RunMode::kRun2;
     } else if (mode == drive::RunMode::kRun2 && verdict.completed) {
