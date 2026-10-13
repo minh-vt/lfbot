@@ -37,3 +37,8 @@ __pycache__/
 
 # Python venv (uv)
 .venv/
+
+# agents
+.agents/
+.scratch/
+skills-lock.json

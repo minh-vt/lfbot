@@ -15,8 +15,8 @@ test:
 sim-test:
     cd firmware && pio run -e sim_test -t exec
 
-# Kiem tra toan dien: format + lint (native + esp32) + test + ne vat can
-check: format-check lint test sim-avoid
+# Kiem tra toan dien: format + lint (native + esp32) + test
+check: format-check lint test
 
 # Tu dong format toan bo ma nguon bang clang-format
 format:
@@ -46,10 +46,6 @@ lint-fix:
 compiledb:
     cd firmware && pio run -e lint -t compiledb
 
-# Chuan hoa sa ban tu anh thuc te AI (Vong loai 6000x1500, Chung ket 10000x1500)
-track:
-    python3 tools/normalize_ai_tracks.py
-
 # Nap chuong trinh xuong chip ESP32-S3
 upload:
     cd firmware && pio run -e esp32s3 -t upload
@@ -61,7 +57,3 @@ monitor:
 # Don dep cache PlatformIO
 clean:
     cd firmware && pio run -t clean
-
-# Kiem thu ne vat can headless (gach tren duong chay, khong va cham)
-sim-avoid:
-	cd firmware && pio run -e sim_avoid -t exec

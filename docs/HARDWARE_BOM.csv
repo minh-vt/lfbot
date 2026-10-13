@@ -1,0 +1,9 @@
+item,qty,choice,price_vnd,supplier,notes
+Động cơ,2,GA12-N20 12V 1000 RPM,40-80k/chiếc,Shopee,"Bản 1000 RPM thường không có encoder; lấy bản có encoder, hoặc giữ encoder Hall cũ / gắn AS5600 vào trục bánh. 1000 RPM + bánh 42mm ≈ 2.2 m/s không tải (~1.5 m/s thực)"
+Driver,1,A4950 (giữ nguyên),0,đã có,"Dòng đỉnh 3.5A đủ cho N20 (dòng kẹt ~1A)"
+Bánh xe,2,"vành in 3D Ø42 + lốp silicone (hoặc bộ bánh 43mm Hshop bọc silicone)",0-200k,in tại xưởng / Hshop,"Món đáng tiền nhất: nâng μ ~0.7 lên ~1.1 → +25% tốc độ qua cua. Bánh 42mm vẫn vừa giới hạn: 115mm track + 42mm = 157mm < 160mm"
+Pin,1,"3S LiPo 300-450 mAh, giắc XT30",150-300k,shop RC trên Shopee,"3S là mức áp cao nhất luật cho phép, khớp motor 12V. Chọn mAh nhỏ nhất đủ dùng vì mỗi gram đè lên tốc độ cua"
+IMU,1,MPU6050 (GY-521),25-50k,"Hshop, lkcg.vn, Shopee","Rẻ nhất danh sách; giữ thẳng khi chạy nhanh, không có dễ đánh võng/mất vạch khi vượt ~1.5 m/s"
+ToF,3,VL53L0X (trước + trái + phải),0,đã có,"Gạch trên tim line màu bất kỳ → IR phản xạ không phân biệt được, phải dùng ToF đo khoảng cách thật. 3 chiếc để chọn phía tránh theo dữ liệu. VL53L1X 4m không cần"
+Cảm biến line,8,8 IR hiện tại (nâng 16× QRE1113 nếu còn ngân sách),0 hoặc 150-250k,đã có / Shopee,"Bố trí CONG (cung ≈ wheelbase/2) — quyết định thiết kế, không phải tham số controller"
+Khung,1,"in 3D PETG, mục tiêu cả xe < 150 g",0,xưởng in,"In khung rỗng dạng gyroid, bỏ OLED nếu không cần; robot nhẹ đổi hướng nhanh hơn"
