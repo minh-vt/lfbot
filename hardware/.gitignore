@@ -1,0 +1,16 @@
+# Archived/backup (recovery-only, not part of the deliverable)
+_archive/
+ir-array/_source-backup/
+
+# KiCad per-user view state + editor locks
+*.kicad_prl
+*.kicad_pro.lck
+~*.kicad_pro.lck
+*.kicad_dru
+
+# KiCad generated caches / history / autosaves
+fp-info-cache
+*-backups/
+_autosave-*
+.history/
+*.bak

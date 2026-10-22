@@ -1,0 +1,4 @@
+(sym_lib_table (version 7)
+  (lib (name "IR_Array") (type "KiCad") (uri "${KIPRJMOD}/IR_Array.kicad_sym") (options "") (descr "TCRT5000 physical pad mapping for OptoDevice:Vishay_TCRT5000"))
+  (lib (name "AO3400A") (type "KiCad") (uri "${KIPRJMOD}/AO3400A.kicad_sym") (options "") (descr "SnapMagic AO3400A"))
+)
