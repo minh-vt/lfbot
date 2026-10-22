@@ -1,5 +1,5 @@
 {
-  "name": "Vòng Loại 2026 (Lane A)",
+  "name": "Vong Loai 2026 (Lane A)",
   "image": "assets/track_vongloai.png",
   "arena_width": 6000.0,
   "arena_height": 1500.0,
@@ -14,7 +14,6 @@
     "min_y": 1076.0,
     "max_y": 1236.0
   },
-  "min_finish_arm_dist_m": 12.0,
   "obstacles": [
     {
       "x": 4352.7,

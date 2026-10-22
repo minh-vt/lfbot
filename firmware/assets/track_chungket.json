@@ -1,5 +1,5 @@
 {
-  "name": "Chung Kết 2026 (Lane A)",
+  "name": "Chung Ket 2026 (Lane A)",
   "image": "assets/track_chungket.png",
   "arena_width": 10000.0,
   "arena_height": 1500.0,
@@ -14,7 +14,6 @@
     "min_y": 1231.5,
     "max_y": 1391.5
   },
-  "min_finish_arm_dist_m": 29.5,
   "obstacles": [
     {
       "x": 3054.3,
