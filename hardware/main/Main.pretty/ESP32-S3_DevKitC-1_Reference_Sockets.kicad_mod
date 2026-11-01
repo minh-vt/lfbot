@@ -3,7 +3,7 @@
 	(generator "pcbnew")
 	(generator_version "10.0")
 	(layer "F.Cu")
-	(descr "PROVISIONAL DevKitC-1 two female sockets, 22 pins/row at 2.54 mm, row spacing 22.86 mm. Socket height 8.5 mm selected by user. Courtyards cover sockets only; elevated 64x27 mm DevKit projection is F.Fab. Underboard low components target <=2 mm; actual vertical clearance, clone pinout/geometry and RF/USB NOT verified. No courtyard overlap exclusion.")
+	(descr "PROVISIONAL TDM2533 socket interface, adapted from DevKitC-1 reference: 22 pins/row at 2.54 mm, row spacing 22.86 mm. Socket height 8.5 mm selected by user. Courtyards cover sockets only; elevated 85x26 mm DevKit projection is an image-based F.Fab estimate, not measured. Underboard low components target <=2 mm; actual vertical clearance, clone pinout/geometry and RF/USB NOT verified. No courtyard overlap exclusion.")
 	(property "Reference" "REF**"
 		(at 26.67 -4 0)
 		(layer "F.SilkS")
@@ -106,8 +106,8 @@
 		(uuid "14c5b513-a298-4b19-9da8-cbf756222864")
 	)
 	(fp_rect
-		(start -2 -2)
-		(end 62 25)
+		(start -2 -1)
+		(end 83 25)
 		(stroke
 			(width 0.1)
 			(type solid)

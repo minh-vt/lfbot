@@ -39,6 +39,14 @@ __pycache__/
 .venv/
 
 # agents
+.pi/
 .agents/
 .scratch/
 skills-lock.json
+
+# Local direnv configuration
+/.envrc
+/.direnv/
+
+# Historical native build artifacts
+/build/
