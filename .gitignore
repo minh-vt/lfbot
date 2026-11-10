@@ -13,6 +13,7 @@
 test_runner
 # espidf
 sdkconfig.*
+!sdkconfig.defaults
 
 # Editor and IDE
 .vscode/
