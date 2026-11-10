@@ -18,4 +18,5 @@ Cac lenh thuong dung: `just test` de kiem thu, `just sim` de mo mo phong. Danh s
 - [Quyet dinh kien truc](docs/decisions/README.md)
 - [Quy tac dong gop va lam viec voi agent](AGENTS.md)
 - [The le](docs/manual.md) va [hoi dap cuoc thi](docs/fqa.csv)
-- [Danh muc linh kien](docs/HARDWARE_BOM.csv)
+- [BOM phan cung](docs/HARDWARE_BOM.csv)
+- [Phan cung module va huong dan dau day](hardware/README.md)

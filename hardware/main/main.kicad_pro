@@ -152,10 +152,10 @@
         "min_silk_clearance": 0.0,
         "min_text_height": 0.8,
         "min_text_thickness": 0.08,
-        "min_through_hole_diameter": 0.3,
+        "min_through_hole_diameter": 0.2,
         "min_track_width": 0.25,
         "min_via_annular_width": 0.1,
-        "min_via_diameter": 0.9,
+        "min_via_diameter": 0.45,
         "solder_mask_to_copper_clearance": 0.0,
         "use_height_for_length_calcs": true
       },
@@ -259,7 +259,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": "A3 WIP"
+      "sch_revision": "A4 WIP"
     },
     "layer_pairs": [],
     "layer_presets": [],
@@ -536,7 +536,7 @@
         "clearance": 0.25,
         "name": "Motor",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
-        "priority": -1,
+        "priority": 0,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 1.0,
         "tuning_profile": "",
@@ -547,7 +547,7 @@
         "clearance": 0.25,
         "name": "Power3V3",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
-        "priority": -1,
+        "priority": 1,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.5,
         "tuning_profile": "",
@@ -558,7 +558,7 @@
         "clearance": 0.25,
         "name": "Power5V",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
-        "priority": -1,
+        "priority": 2,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.75,
         "tuning_profile": "",
@@ -569,7 +569,7 @@
         "clearance": 0.25,
         "name": "VM",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
-        "priority": -1,
+        "priority": 3,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 2.0,
         "tuning_profile": "",
@@ -781,5 +781,19 @@
       "version": 0
     },
     "tuning_profiles_impedance_geometric": []
+  },
+  "kicad_routing_tools": {
+    "fab_floor_origin": {
+      "min_track_width": 0.25,
+      "min_via_diameter": 0.45,
+      "min_via_annular_width": 0.1,
+      "min_through_hole_diameter": 0.2,
+      "min_hole_clearance": 0.25,
+      "min_via_drill": 0.2
+    },
+    "records_rev": 2,
+    "repo_rules": {
+      "min_via_drill": 0.3
+    }
   }
 }

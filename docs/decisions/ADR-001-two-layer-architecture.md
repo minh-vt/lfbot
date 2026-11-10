@@ -1,7 +1,9 @@
 # ADR-001: Kiến trúc 2 tầng — drive không-thứ-nguyên + imperative-shell adapters
 
 ## Status
-Accepted
+Superseded by [ADR-007](ADR-007-readings-first-core.md) (2026-10-13).
+
+Noi dung duoi day duoc giu lam lich su, khong phai contract hien hanh. Cac nhan dinh ve dai luong robot khong the quan sat khong duoc dung lam rang buoc cho thiet ke moi.
 
 ## Date
 2026-10-12

@@ -1,70 +1,72 @@
-# AGENTS.md - LF-Bot 2026 Autonomous Racing Platform
+# Lam viec voi LF-Bot
 
-Tài liệu định nghĩa ngữ cảnh, quy tắc kiến trúc và hợp đồng phát triển cho AI Agents & Codex trong dự án LF-Bot.
+LF-Bot la robot bam line va vuot chuong ngai vat cho cuoc thi F-Maze-Solving. Tai lieu nay quy dinh cach lam viec, khong lap lai thiet ke hay lich su trien khai.
 
----
+## Doc dung nguon
 
-## 1. Tổng quan Dự án & Kiến trúc (Context Hierarchy Level 1)
-Robot tự hành dò line tốc độ cao và vượt chướng ngại vật thi đấu "F-Maze-Solving" (Đại học FPT).
-Mã nguồn được phân tách theo mô hình kiến trúc sâu (Deep Modules) với ranh giới phân tầng nghiêm ngặt:
-- **`firmware/lib/`**: Lõi C++17 độc lập phần cứng/OS — `drive/` (thuật toán thuần, không-thứ-nguyên: `step`, `plan`) + `sensing/` (chân lý cảm biến + chuẩn hóa). Không phụ thuộc Arduino, FreeRTOS hay Raylib.
-- **`firmware/src/sim/`**: Môi trường mô phỏng máy tính để bàn (Raylib 2D), nhận diện vạch quang học (8 cảm biến IR) và ToF trên sa bàn 6000×1500 mm (vòng loại) / 10000×1500 mm (chung kết), 1 px = 1 mm.
-- **`firmware/src/esp32/`**: Firmware nhúng chạy trên vi điều khiển ESP32-S3 FreeRTOS (dual-core 240MHz, ADC-DMA, PCNT, MCPWM).
-- **`firmware/test/`**: Bộ kiểm thử tự động không đồ họa (Headless Native Tests).
-- **`docs/ARCHITECTURE.md`**: Spec kiến trúc duy nhất (SSoT) — drive không-thứ-nguyên + adapters (sim, esp32). Quyết định ghi nhận tại `docs/decisions/ADR-*.md`, việc còn dở tại `docs/ROADMAP.md`.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): kien truc dich, ranh gioi du lieu va cac diem chua chot. Doc truoc khi sua core.
+- [docs/decisions/README.md](docs/decisions/README.md): quyet dinh va ly do; kiem tra status truoc khi ap dung ADR cu.
+- [docs/NAMING.md](docs/NAMING.md): nguon quy uoc dat ten duy nhat, bat buoc ap dung.
+- [docs/manual.md](docs/manual.md), [docs/fqa.csv](docs/fqa.csv): nguon luat thi dau. Neu mau thuan, neu ro thay vi tu dien giai.
+- [docs/HARDWARE_BOM.csv](docs/HARDWARE_BOM.csv): danh muc de xuat, khong phai ket qua hieu chuan.
 
----
+Code hien tai va ghi chu `.scratch/` co the thuoc thiet ke cu. Khong lay chung lam bang chung rang kien truc moi da duoc trien khai. Khong sua code chi de lam no khop tai lieu khi chua duoc giao viec do.
 
-## 2. Tech Stack & Công Cụ
-- **Ngôn ngữ:** C++17 (Google C++ Style, 2-space indentation).
-- **Build System & Toolchain:** PlatformIO Core (Native GCC cho Desktop/Test, Espressif32 toolchain cho ESP32-S3).
-- **Task Runner:** `just` (quản trị toàn bộ lệnh thực thi).
-- **Linter & Formatter:** `clang-format` cho toàn bộ C++ (gồm `src/esp32`); `clang-tidy` cho code build được trên host (drive/sim/test/header thuần) và `cppcheck` cho firmware ESP32-S3 (IDF không parse được bằng clang-tidy host). Policy 0 errors, 0 warnings.
-- **Đồ họa & Mô phỏng:** Raylib Desktop (hỗ trợ cả GUI và chế độ xử lý ảnh Headless).
-- **Thư viện bên thứ ba:** `nlohmann-json` — chỉ dùng trong sim để parse manifest track; drive và esp32 không phụ thuộc.
-- **ESP32:** `framework = espidf` (ESP-IDF 6.1, bỏ Arduino). FreeRTOS task 500Hz (`vTaskDelayUntil` 2ms, core 1, entry `app_main`) + API IDF mới: `esp_adc/adc_oneshot.h`, `driver/pulse_cnt.h`, `driver/mcpwm_prelude.h`, `driver/i2c_master.h`. `src/CMakeLists.txt` chỉ biên dịch `esp32/*` (không `src/sim`). Build cần venv `uv` (`.venv`) có pip; env esp32s3 dùng `build_unflags=-std=gnu++11`.
+## Pham vi va ky luat thay doi
 
----
+1. Xac dinh yeu cau, doc cac seam lien quan, chot tieu chi kiem chung truoc khi sua.
+2. Kiem tra working tree; giu nguyen thay doi co san cua nguoi dung. Khong reset, stage hay commit neu chua duoc yeu cau.
+3. Sua dung pham vi. Yeu cau tai lieu khong phai uy quyen viet lai code hay sua build.
+4. Dung skills phu hop; ap dung nguyen tac, khong sao chep framework/abstraction trong vi du cua skill.
+5. Bao cao lenh da chay, ket qua va gioi han xac minh. Khong dung ket qua cu de tuyen bo code hien tai pass.
+6. Sau moi ticket hoac khi dung mot slice, cleanup file/code/report da chet trong pham vi vua lam; cap nhat tham chieu va kiem tra lai. Chi xoa khi co bang chung khong con dung, giu recovery cho file chua tracked; khong xoa du lieu nguon, CAD/thu vien con tham chieu, lock dang hoat dong hay thay doi ngoai pham vi.
 
-## 3. Danh Mục Lệnh Tiêu Chuẩn (Command Center)
-Mọi agent BẮT BUỘC sử dụng các lệnh qua `just`:
+## Ranh gioi bat buoc
 
-```bash
-just test         # Chay toan bo unit tests headless (< 0.3s)
-just sim-test     # Chay kiem thu mo phong headless 2 luot (Map & Sprint) (< 0.5s)
-just check        # Kiem tra toan dien: format + lint (native + esp32) + test
-just sim          # Chay mo phong GUI Raylib Desktop (danh cho nguoi dung quan sat)
-just format       # Tu dong format toan bo ma nguon C++ bang clang-format
-just format-check # Kiem tra format (dung cho CI/CD)
-just lint         # Kiem tra tinh: clang-tidy (native) + cppcheck (esp32)
-just lint-native  # clang-tidy voi firmware/compile_commands.json (drive/sim/test)
-just lint-esp32   # cppcheck cho firmware ESP32-S3 (pio check -e esp32s3)
-just lint-fix     # Tu dong sua loi clang-tidy va format lai code
-just compiledb    # Cap nhat database bien dich compile_commands.json
-just track        # Sinh sa ban procedural ngau nhien (generate_track.py)
-```
+- Core `firmware/lib/` doc lap phan cung/OS: khong Raylib, ESP-IDF, FreeRTOS, file I/O, `printf` hay bien toan cuc. Trang thai co chu so huu ro rang.
+- Core `firmware/lib/robot/` phang: `robot_data.hpp` chi du lieu (khong include Robot/Race); `Drive` so huu conversion/freshness/deadline va duoc Robot cung environment training dung chung; Robot la scoped typed owner; Race quyet dinh chuyen dong. Platform chi borrow Robot qua RobotSession/run_robot, khong own/cap storage core. Simulation chi nhan `MotorOutput`, khong include/call/link Robot, Race hay policy; composition nam o `RaceTrial`. ESP32/HIL deferred, khong restore core cu de cuu build.
+- `SensorReadings` la so do da chuan hoa, khong phai tui trang thai hay duong muc tieu. Khong sua so do de ne vat can; khong them `LineView`/nhan ahead-side lam lop trung gian mac dinh.
+- Khong dua ground truth cua sim vao quyet dinh robot. Vat ly va cham luat phai chay headless, GUI chi quan sat/dieu khien cong cu mo phong.
+- Giu hai luot thi dau va phan biet voi multi-pass xu ly. Khong tu bo yeu cau multi-pass, cung khong them pass-manager framework khi chua can.
+- Khong doan kich thuoc phan cung, he so bam, gain hay tinh hop le cua duong dua. Track mau la fixture, khong phai dai dien sa ban bi mat.
+- Khong block hay cap phat dong trong vong dieu khien; khong cat timing, hieu chuan, tinh hop le cua so do va an toan de lay it dong code.
 
----
+## Clean code
 
-## 4. Các Ranh Giới Bất Biến (Strict Boundaries & Non-negotiables)
-1. **Không bao giờ trộn mã GUI vào Core Library hoặc Physics:**
-   - Thư viện trong `firmware/lib/` KHÔNG BAO GIỜ include `raylib.h`, không bao giờ dùng `printf`, không dùng biến toàn cục.
-   - Vòng lặp vật lý mô phỏng (`SimEngine`) phải luôn chạy được ở chế độ **Headless (không mở cửa sổ)**.
-2. **Quy tắc Kiểm thử Tự động (Verification Contract):**
-   - Tuyệt đối KHÔNG yêu cầu người dùng phải tự bật `just sim` để làm "smoke-test" bằng mắt.
-   - Mọi thay đổi liên quan đến thuật toán điều khiển, bám line, né vật cản, quy hoạch $C^2$ phải được kiểm chứng tự động bằng `just test` và `just sim-test`.
-3. **Chuẩn mã nguồn sạch:**
-   - 100% mã nguồn C++ tuân thủ quy tắc 2-space của `.clang-format`.
-   - Biên dịch với cờ `-Wall -Wextra -Wpedantic` không phát sinh bất kỳ cảnh báo nào.
-4. **Đặt tên theo việc robot làm (Linux-style):**
-   - Tên = động từ/danh từ việc robot làm (`steer_to_line`, `plan_speed`, `avoid_obstacle`), KHÔNG phải lý thuyết (PD, feedforward, backward-pass). Lý thuyết nằm trong comment/implementation. Xem `docs/NAMING.md`.
+- C++17, Google C++ Style, 2-space theo `.clang-format`; `-Wall -Wextra -Wpedantic`, 0 errors, 0 warnings.
+- Ten ham la viec robot lam, struct la danh tu mien; chi tiet xem `docs/NAMING.md`.
+- Interface nho, implementation sau. Khong moi ham mot module, khong class/factory/plugin chi de boc mot implementation.
+- DRY theo kien thuc va contract: hieu chuan/hinh hoc dung chung mot nguon; khong sao chep controller giua sim/that hoac hai luot.
+- Comment chi giu ly do, don vi, rang buoc kho thay. Khong restate code, banner trang tri hay code da comment-out.
 
----
+## Cong cu va lenh
 
-## 5. Quy Trình Làm Việc Của Agent (Thinking Framework)
-1. **Trước khi sửa code:** Khảo sát các seam liên quan, xác định tiêu chí thành công cụ thể (ví dụ: test nào sẽ pass).
-2. **Sửa code tinh gọn (Surgical Changes):** Chỉ chạm đúng những dòng cần sửa, không tái cấu trúc mã xung quanh không liên quan.
-3. **Xác minh độc lập (Independent Verification):**
-   - Chạy `just test`
-   - Chạy `just format-check`
-   - Báo cáo kết quả định lượng kèm theo số liệu đo đạc, không phán đoán mơ hồ.
+Dung `just` cho build, test, lint va format. Xem `just --list` va [justfile](justfile) de biet recipe thuc te; khong sao chep lenh build thu cong vao tai lieu.
+
+PlatformIO CLI la frontend build duy nhat cho native va ESP32; xem [platformio.ini](firmware/platformio.ini) va recipe trong [justfile](justfile). Native can compiler C++17, pkg-config, libpng, nlohmann-json va Raylib cho GUI; clang-format/clang-tidy cho quality gates. ESP32/ESP-IDF/HIL van deferred; CMake noi bo ESP-IDF do PIO quan ly, khong la frontend thu hai. Xem [ADR-013](docs/decisions/ADR-013-platformio-only.md) va [ADR-004](docs/decisions/ADR-004-esp32-toolchain.md).
+
+| Lenh | Muc dich |
+|---|---|
+| `just test` | Kiem thu core va lifecycle/pose GUI composition headless |
+| `just test-sim-runtime` | Kiem thu runtime headless: loader/world/referee/tick, khong phai hai luot |
+| `just format-check` | Kiem tra clang-format |
+| `just lint` | clang-tidy native; ESP32 lint/HIL deferred trong milestone sim+lib |
+| `just build-native` | PIO build GUI va tests native |
+| `just check` | Format, lint, core/composition/runtime tests va native build |
+| `just sanitize` | PIO build va chay tests voi ASan/UBSan |
+| `just compiledb` | PIO xuat `firmware/compile_commands.json` |
+| `just sim` | Mo GUI cho nguoi dung, khong phai smoke test tu dong |
+
+Cai `clang-format`, `clang-tidy`, `cppcheck` cho cac quality gate tuong ung. Cac recipe tham chieu file da xoa co the chua chay duoc trong dot tai thiet; bao ro loi, khong tu khoi phuc thiet ke cu.
+
+## Hop dong xac minh
+
+- Thay doi code: chay `just test` va `just format-check`; lint/build nen tang bi anh huong khi phu hop. Thay doi engine/interface phai giu `test_sim_runtime` chi link engine + data, khong keo controller vao.
+- Thay doi bam line, ne vat can, dieu khien hay lap duong: them regression nho cho hanh vi bi anh huong; chay `just test` va `just test-sim-runtime`. Gate full-race `sim-test` da bo theo yeu cau; tests xanh khong chung minh robot hoan thanh duong dua.
+- Khong yeu cau nguoi dung mo `just sim` de tu xac nhan thay cho kiem thu tu dong.
+- Thay doi chi tai lieu: kiem tra diff, link noi bo, recipe duoc nhac toi va tinh nhat quan giua cac nguon. Neu chay test cu, khong goi ket qua do la xac minh kien truc moi.
+- Neu bi chan boi dependency, file thieu hay loi co san, ghi dung nguyen nhan va pham vi chua kiem chung; khong sua ngoai pham vi chi de lay ket qua xanh.
+
+## Duy tri tai lieu
+
+`README.md` chi giu muc dich, diem bat dau va link; khong them cay file chi tiet, cong thuc, phim tat GUI hay so lieu test. `ARCHITECTURE.md` mo ta thiet ke hien hanh, ADR giai thich lua chon. Khi thay quyet dinh, tao ADR moi va danh dau ADR cu bi thay the; khong xoa lich su hay bien gia thuyet thanh ket luan da do.

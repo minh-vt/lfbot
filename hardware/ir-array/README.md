@@ -1,5 +1,7 @@
 # IR array — tám mắt, dải cong IR-03
 
+> **Thiết kế PCB đã dừng theo [ADR-019](../../docs/decisions/ADR-019-module-based-hardware.md).** Nội dung bên dưới là lịch sử, không phải hướng dẫn lắp hiện hành. Dùng [pin map module](../wiring.md); không gia công hoặc đấu dây theo bảng cũ. Giữ source và thư viện chờ duyệt cleanup.
+
 **IR-03 placement được người dùng duyệt G1 ngày 2026-10-19; chưa phát hành gia công.** Hai vai bo tròn, không tai đầu/bậc giữa; header đực 1×12 gần mép trong; giữ8 TCRT5000 và mạch headroom IR-02. Schematic giữ nguyên. Outline option02 đã được khớp lại vào footprint native qua KiCad IPC; placement sensor/header không đổi. Board nguồn chưa route. Một recovery candidate bị đổi thành bản có218 cung tròn và35 lỗi DRC; đã tái tạo bản sạch rồi thử reroute riêng +3V3, tăng margin +3V3 từ0.592 lên0.9005mm. Nhưng bản thử thêm3 via-in-pad SMD và EMC analyzer báo GP-001 regression cho /IR1; dù native DRC0 lỗi/0 unconnected, bản này **không được chọn làm candidate tốt hơn hoặc nhập vào nguồn**. Track /IR7 vẫn0.700mm; còn26 board warnings/42 parity warnings. Xem [review và log quyết định](OPTIMIZATION_REVIEW.md), [lịch sử outline/routing](REVIEW.md). G2/fabrication chưa duyệt.
 
 Yêu cầu hiện tại: tám TCRT5000 trên một cung trong mặt phẳng PCB, các mặt đọc
@@ -13,16 +15,17 @@ BOM mua hàng vẫn là [HARDWARE_BOM.csv](../../docs/HARDWARE_BOM.csv).
 
 J1=`PinHeader_1x12_P2.54mm_Vertical` (header đực thẳng, 1×12). Số chân dưới đây là số pad,
 không phải thứ tự nhìn từ đầu dây. Header không có khóa; đánh dấu pad1 ở cả hai
-đầu và continuity-test harness trước cấp nguồn, không đoán theo màu dây. Phân bổ DevKit theo guide chính hãng v1.1,
-chưa chứng minh clone V1 có cùng header/nguồn. Carrier CAD/firmware chưa migrate
-sang phân bổ này và vẫn tạm dừng; không coi bảng là dây robot đã được đấu thử.
+đầu và continuity-test harness trước cấp nguồn, không đoán theo màu dây. Bảng
+GPIO dưới đây khớp netlist [MAIN hiện tại](../main/main.kicad_sch), với số chân
+DevKitC-1 tham chiếu; chưa xác minh pinout/nguồn của TDM2533 thực tế hoặc
+firmware. Không coi bảng là dây robot đã được đấu thử.
 
 | J1 IR | Net | GPIO / ADC1 | Header DevKit chuẩn |
 |---|---|---|---|
 | 1 | +5V | Nguồn LED từ buck; không nối ADC | J1.21 (rail5V; phải kiểm tra backfeed hệ thống) |
 | 2 | +3V3 | Nguồn pull-up từ DevKit | J1.1 hoặc J1.2 |
 | 3 | GND | Ground chung | J1.22 hoặc J3.1 |
-| 4 | LED_EN | GPIO14, active high | J1.20 |
+| 4 | LED_EN | GPIO21, active high | J3.18 |
 | 5 | IR0 | GPIO1 / CH0 | J3.4 |
 | 6 | IR1 | GPIO2 / CH1 | J3.5 |
 | 7 | IR2 | GPIO4 / CH3 | J1.4 |
@@ -34,11 +37,13 @@ sang phân bổ này và vẫn tạm dừng; không coi bảng là dây robot đ
 
 BAT_ADC dành GPIO10/ADC1_CH9, headerJ1.16, **không đi qua cáp IR**. Đưa nó
 vào cùng pattern continuous gồm9 kênh; không chạy oneshot trên ADC1 đang
-continuous. Không dùng ADC2 DMA hoặc GPIO3 cho IR/BAT. Giữ GPIO19/20 cho USB,
-0/3/45/46 ngoài phân bổ này,35…37 cho ràng buộc bộ nhớ Octal và38/48 để tránh
-RGB LED khác nhau giữa các bản board. Dành11/12 cho I²C,13 cho một ToF XSHUT,
-15…18 encoder;39…42 còn đủ cho bốn đầu điều khiển motor, nhưng sẽ không giữ
-JTAG ngoài đồng thời. Đây là phân bổ thiết kế, không sửa pin map firmware cũ.
+continuous. Không dùng ADC2 DMA hoặc GPIO3 cho IR/BAT. MAIN để GPIO19/20
+cho USB; không dùng GPIO0/3/45/46 và GPIO35…37 dành cho bộ nhớ Octal.
+GPIO11…14 điều khiển hai A4950; GPIO15…18 tới cầu encoder R12…R15 mặc định
+DNP. I²C dùng GPIO39/38 qua J5.3/J5.4; GPIO42/41 ra J5.5/J5.6. Đối chiếu
+pinout module ToF trước khi đấu. GPIO38 có thể nối RGB LED trên một số
+DevKit; phải xác nhận revision TDM2533, không bật LED trên chân đang dùng
+cho I²C. Không lấy phân bổ GPIO cũ trong tài liệu IR để cấu hình MAIN.
 
 ### Headroom ADC và nguồn
 

@@ -1,7 +1,9 @@
 # ADR-006: Naming Linux-style + clean-code conventions
 
 ## Status
-Accepted
+Accepted — nguyen tac dat ten theo viec robot lam.
+
+Ghi chu tai thiet (2026-10-13): [NAMING.md](../NAMING.md) la quy uoc hien hanh. Danh sach doi ten duoi day ghi lai dot trien khai cu, khong bat buoc tai tao cac type/ham do trong codebase moi.
 
 ## Date
 2026-10-12
@@ -10,7 +12,7 @@ Accepted
 Tên cũ trộn lý thuyết điều khiển (PD, feedforward, backward-pass, curvature, μ) vào public API; làm AI agent + người đọc khó hiểu *việc robot làm*.
 
 ## Decision
-Tên = **việc robot làm**, không phải lý thuyết; lý thuyết nằm trong comment/implementation (`docs/NAMING.md`):
+Tên = **việc robot làm**, không phải lý thuyết; lý thuyết nằm trong comment/implementation ([NAMING.md](../NAMING.md)):
 - `SensorFrame`→`Readings`, `TrackPlan`→`RacePlan`, `MotorCommand`→`DriveCommand`, `TuneConfig`→`Tuning`.
 - `steer_pd`→`steer_to_line`, `throttle_profile`→`choose_speed`, `mix_differential`→`drive_motors`, `resolve_line_error`→`resolve_line_offset`→`fuse_line_offset`, `bake`→`plan_speed`.
 - Bỏ `docs/CONTEXT.md` + 8 thuật ngữ cũ (RawTrace, TrackCorridor, …).

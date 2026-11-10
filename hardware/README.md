@@ -1,24 +1,14 @@
 # Phần cứng LF-Bot
 
-Thiết kế phần cứng duy nhất đang hoạt động: dải cảm biến IR-03 (`ir-array/`).
+Cấu hình hiện hành dùng module mua sẵn: ESP32-S3 N16R8, một thanh IR analog 8 mắt, hai DRV8871, một ToF400C VL53L1X và GY-9250; giữ pin 3S và motor 12 V. Hai MKE-S16 để dự phòng. Đã dừng chế tạo PCB riêng; firmware ESP32 chưa migrate theo bộ dây mới.
 
 ## Bắt đầu
 
-- [IR project](ir-array/ir-array.kicad_pro): board 2 lớp 85×24.5 mm, 8×TCRT5000, header đực 1×12.
-- [File Gerber để gửi in](ir-array/release/ir-array-gerber-thegioiic.zip): board final, DRC sạch, đã verify.
-- [Review IR/ADC/DMA](ir-array/REVIEW.md), [giới hạn/căn cứ IR](ir-array/README.md), [log tối ưu route/DFM](ir-array/OPTIMIZATION_REVIEW.md).
-- [BOM mua hàng duy nhất](../docs/HARDWARE_BOM.csv).
+- [Pin map, nguồn và cách đấu dây](wiring.md).
+- [BOM hiện hành](../docs/HARDWARE_BOM.csv).
+- [Quyết định chuyển sang module](../docs/decisions/ADR-019-module-based-hardware.md).
+- [Review codebase và danh sách cleanup chờ duyệt](../docs/CLEANUP_REVIEW.md).
 
-## Thư viện
+## Thiết kế PCB đã dừng
 
-Ba file tùy biến được giữ trong repo:
-
-- `ir-array/IR_Array.kicad_sym`: symbol TCRT5000 (ánh xạ pad 1=C/2=E/3=K/4=A).
-- `ir-array/AO3400A.kicad_sym`: symbol MOSFET AO3400A.
-- `ir-array/IR_Array.pretty/Outline_IR03.kicad_mod`: contour bo mạch 85×24.5 mm.
-
-Footprint và symbol chuẩn (TCRT5000, điện trở 0805, tụ, header 1×12, SOT-23, lỗ vít) không copy vào repo; chúng được nạp từ thư viện global của KiCad (giống hệt KiCad 10 stock).
-
-## Đã retire
-
-Toàn bộ project chức năng cũ (root `lfbot` + sheet `front`/`power`/`controller`), project `carrier` rỗng, symbol library cũ, bản cơ khí M03, tài liệu cũ và các thư viện footprint không còn tham chiếu nằm trong [`_archive/`](_archive/). Xóa thư mục này khi không cần phục hồi nữa.
+[MAIN](main/README.md), [IR-03](ir-array/README.md) và `_archive/` được giữ để phục hồi, không phải hướng dẫn đấu module hiện hành. Không gửi Gerber IR cũ đi in hoặc dùng pinout MAIN cho bộ dây mới. Source CAD, thư viện, mechanical models và lịch sử chưa bị xóa; mọi cắt bỏ phải theo danh sách cleanup được duyệt.

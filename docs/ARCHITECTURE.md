@@ -1,128 +1,274 @@
-# LF-Bot 2026 — Kiến trúc tái thiết: Kernel không-thứ-nguyên + Adapters
+# Kiến trúc LF-Bot
 
-> Quyết định ghi nhận: `docs/decisions/ADR-*.md` · Việc còn dở: `docs/ROADMAP.md`.
+## 1. Trạng thái và phạm vi
 
-## Problem Statement
+Thiết kế này đã được duyệt và triển khai một phần ngày 2026-10-19 theo [ADR-012](decisions/ADR-012-action-driven-simulation.md): core phẳng với `Drive` dùng chung, engine nhận `MotorOutput`, `Referee`, `RaceTrial`, và composition ngoài engine. Frontend build hiện hành là PlatformIO CLI cho toàn bộ project theo [ADR-013](decisions/ADR-013-platformio-only.md). [IMPLEMENTATION](IMPLEMENTATION.md) ghi phần đã chạy được và giới hạn; [PLAN](PLAN.md) giữ backlog còn mở. Tài liệu này không phải bằng chứng hoàn thành đường đua, timing hay an toàn phần cứng.
 
-Robot LF-Bot thi đấu F-Maze-Solving: sa bàn **bí mật** (không biết trước tới ngày thi), 2 run (Run 1 dò, Run 2 sprint), né vật cản, 500Hz hard real-time trên ESP32-S3, phải **tự map + dựng profile on-chip trong 3 phút**. Kiến trúc hiện tại không đáp ứng vì:
+Phần cứng chuyển sang module mua sẵn theo [ADR-019](decisions/ADR-019-module-based-hardware.md); pin map hiện hành ở [wiring](../hardware/wiring.md). MAIN A4950 và IR-03 đã dừng, không còn là sơ đồ đấu dây. Thay đổi này chưa migrate adapter ESP32 hoặc thêm IMU vào contract core.
 
-1. **God-class SimEngine** (8 trách nhiệm) + **3 struct state trùng lặp** (`RobotState`/`SimRobotState`/`RigidBodyState`) chép tay ~15 trường mỗi tick.
-2. **Segment map rời rạc** (3 bin, debounce 30 tick) thay vì profile liên tục.
-3. **Trộn vật lý** (mm, m/s, μ, g) vào trong trí tuệ — robot thật không quan sát được các đại lượng này.
-4. **`just sim-test` hỏng** (alias `lf::RobotMode`) — không verify tự động, vi phạm hợp đồng kiểm thử.
+Chưa triển khai: environment/policy RL, chẩn đoán nguyên nhân DNF, GUI automation, ESP32/HIL. RL vẫn là **ứng viên cần đo**, không phải controller đã chọn. ESP32/ESP-IDF giữ nhãn deferred; không đổi OS.
 
-## Solution
+Nguồn quy ước duy nhất là [NAMING](NAMING.md). Luật thi ở [manual](manual.md) và [FAQ](fqa.csv); khi mâu thuẫn phải làm rõ, không tự sáng tác luật. [BOM](HARDWARE_BOM.csv) và geometry sim là đề xuất, không phải calibration đã đo. ESP32/ESP-IDF/HIL vẫn là milestone riêng; không đổi OS.
 
-Kiến trúc **2 tầng**: drive không-thứ-nguyên (thuần, không Raylib/OS) + imperative-shell adapters (sim, esp32). **Một seam ngoài duy nhất** `step(state, frame, plan, cfg) → command`. Profile liên tục 1-D (2 mảng theo tick) + **backward-pass tick-space**. Chiến lược 2-run thống nhất (Direction A): Run 1 ghi, Run 2 phát lại — không có controller riêng cho từng run.
+## 2. Các quyết định thiết kế
 
-## User Stories
+1. **Simulator nhận lệnh motor, không nhận controller.** Engine không include/call/link Robot, Race hoặc RLtools; phụ thuộc dữ liệu cảm biến/motor là có chủ đích.
+2. **Ghép chương trình ở bên ngoài engine.** GUI, đánh giá hai lượt và trainer là callers, không phải các nhánh trong `Simulation`.
+3. **Một implementation normalization và kiểm tra motor.** Robot triển khai và môi trường training dùng cùng module `Drive`; không nhân bản math, counter wrap hoặc deadline logic.
+4. **Giữ Robot là scoped owner cho đường chạy robot.** GUI/ESP32 chỉ borrow qua `run_robot`/`RobotSession`; không được dựng hoặc cấp storage cho private Robot/Race.
+5. **Một package core phẳng, PlatformIO CLI là frontend build duy nhất.** Tách trách nhiệm không đòi mỗi class có package, manifest, `include/` và `src/` riêng.
+6. **Không dựng controller framework.** Không `IController`, factory, registry, type erasure, `void*` context hoặc template hóa toàn bộ codebase để đổi controller. RL là ứng viên cần đo, không phải kiến trúc mặc định.
 
-1. Là kỹ sư firmware, tôi muốn toàn bộ trí tuệ robot nằm trong một module drive thuần, để hiểu và sửa toàn bộ engine quyết định trong dưới 5 phút.
-2. Là kỹ sư firmware, tôi muốn drive chỉ thấy đại lượng không-thứ-nguyên (`line_offset ∈ [-1,1]`, tick thô, `dt`), để cùng một code chạy nguyên vẹn trên sim và ESP32.
-3. Là AI agent, tôi muốn một seam ngoài duy nhất `step()`, để đọc code theo đường `main → adapter → drive` mà không lạc trong 24 file.
-4. Là thí sinh (robot), tôi muốn tự dò sa bàn bí mật ở Run 1 và dựng profile trên chip, để Run 2 sprint nhanh hơn mà không cần map cho trước.
-5. Là thí sinh, tôi muốn profile liên tục (không segment map), để không mất thời gian debounce/lookup khi vào cua.
-6. Là thí sinh, tôi muốn backward-pass tick-space giảm ga *trước* khúc cua (ràng buộc phanh phi-cục bộ), để không lao quá tốc độ vào cua và mất vạch.
-7. Là thí sinh, tôi muốn né vật cản ở cả 2 run — Run 2 biết trước vị trí từ Run 1 — để không va chạm ở tốc độ sprint.
-8. Là kỹ sư CI, tôi muốn `just test` + `just sim-test` xanh trong < 1s không cần GUI, để mọi thay đổi được verify tự động.
-9. Là người dùng simulation, tôi muốn `just sim` hiển thị cuộc đua 2 run với HUD, để quan sát hành vi bằng mắt.
-10. Là trọng tài (arbiter), tôi muốn phán quyết ground-truth (finish box, clearance, wrong-way) độc lập với niềm tin của robot, để kết quả khách quan.
-11. Là kỹ sư firmware, tôi muốn adapter ESP32 đổi ADC/PCNT/ToF → frame chuẩn hóa và `DriveCommand` → MCPWM, để phần cứng và mô phỏng dùng chung một drive.
-12. Là nhà phát triển, tôi muốn mission FSM (Idle→Run1→Run2→Done) là một switch ~10 dòng mỗi shell, để không tạo module orchestration thừa.
+### Module và interface
 
-## Implementation Decisions
+| Module | Interface/caller cần biết | Implementation được che giấu |
+|---|---|---|
+| Dữ liệu robot | `SensorSample<T>`, `SensorMeasurements`, `SensorReadings`, `Calibration`, `MotorDemand`, `MotorOutput`, request/status | Không có implementation điều khiển, platform hay file I/O |
+| `Drive` | Nhận calibration, đọc/chuẩn hóa một packet, kiểm tra demand và tạo output, báo fault, rebase khi bắt đầu lượt | Kiểm tra calibration, clock/counter history, đơn vị, age/validity, freshness theo nguồn, giới hạn và chuyển duration thành deadline |
+| `Robot` / `Race` | `run_robot`, `Robot::drive/observe`, các yêu cầu lifecycle rõ nghĩa | Robot owns Drive + Race; Race owns quyết định chuyển động, trạng thái và trí nhớ hai lượt; representation private |
+| `Simulation` | Borrow track bất biến; chuẩn bị/bắt đầu/dừng lượt, nhận `MotorOutput` để tiến một tick, đọc snapshot | World, acquisition cadence, logical clock, referee, trạng thái vật lý và kết quả một lượt |
+| `RaceTrial` | Chạy tick với Robot đang borrow; yêu cầu start/stop/reset; đọc kết quả cả hai lượt | Ghép Robot với Simulation, handshake, reposition/rebase, accounting; không tự điều khiển motor |
+| Renderer | Đọc frame/trace và trạng thái playback | Raylib, camera, docks, trails/ghost; không chạy vật lý/controller |
+| Environment training | Operation RLtools cho state/action/observation/reward/terminal | Ghép Drive với Simulation và trạng thái episode; không sao chép physics, safety hoặc referee |
 
-- **D1 — Functional core + imperative shell:** drive = free functions thuần (DOD); class chỉ cho adapter sở hữu tài nguyên (Raylib `Image`, peripheral ESP32).
-- **D2 — Ranh giới drive:** drive = normalized-in → command-out + toàn bộ chiến thuật (mất vạch, né, finish latch, profile). Quy hoạch quỹ đạo 2D loại bỏ.
-- **D3 — Một facade:** `step(state, frame, plan, cfg) → command` là seam ngoài + bề mặt test; internal seams (`resolve_line_offset`, `steer_to_line`, `avoid_strength`, `choose_speed`, `drive_motors`) test trực tiếp.
-- **D4 — Profile liên tục 1-D:** hai mảng `planned_steer[tick]` + `speed_limit[tick]`, nội suy O(1). Không SegmentType/debounce.
-- **D5 — Dimensionless contract:** drive chỉ thấy `[-1,1]`, tick thô, `dt`. Không mm/m/s/μ/g/wheelbase.
-- **Direction A — Unified controller:** `steer = planned_steer[tick] + PD(e)`; `throttle = speed_limit[tick] · obstacle_factor`. Run 1 = plan rỗng (feedback-dominant, đang ghi), Run 2 = plan đầy (feedforward-dominant, phát lại). `step` **không biết mode** — "plan rỗng vs đầy" chính là mode.
-- **Backward-pass tick-space (plan_speed):** quét ngược O(N), dimensionless:
-  `speed_limit[tick] = min(grip_throttle(tick), speed_limit[tick+1] + brake_limit)`,
-  với `grip_throttle(tick) = 1 − corner_k·|planned_steer[tick]|`.
-  Lý do tồn tại: ràng buộc phanh là **phi-cục bộ** (khớp `tick` với `tick+1`), grip limit chỉ là cục bộ. `brake_limit` tuyến tính là xấp xỉ bậc nhất của ràng buộc `v²`, hấp thụ vào tuning.
-- **μ·g·R là oracle trong sim, không vào drive:** mô hình grip vật lý cần `R` (hình học 2D) + đơn vị vật lý → vi phạm D4/D5 và robot thật không tính được. Sim dùng nó để **kiểm chứng** profile của robot (profile-feasibility test).
-- **Né vật cản (F1):** mảng thứ 3 `obstacle_side[tick]` (±1) ghi ở Run 1, làm mượt thành cửa sổ ±W tick (chịu trôi odometry), dùng làm bias feedforward ở Run 2 + ToF phản ứng làm safety net.
-- **Tuning (F2) — auto-tune 3 tầng:** Run 1 chính là calibration — profile feasible-by-construction (ghi cái đã *thực thi*, không phải kế hoạch mơ). `Tuning` tách làm 2 lớp: **(1) derive** — `d_filter_alpha` (từ `dt`+fc), `obstacle_window` (từ lookahead+odometry), `brake_limit` (max drop quan sát Run 1); **(2) measure-once (hằng số robot)** — `kp`/`kd` qua pole-placement (ζ=0.7, ωn đo 1 lần), `speed_limit(κ)` (hàm theo ĐỘ CONG, circle-test on-robot, không cần μ), `avoid_strength/slowdown` fix theo hình học; **(3) trim-on-track (2 núm theo sa bàn)** — `base_throttle` + `sprint_scale` tự chỉnh trong Run 1 theo quy tắc line-loss monotonic. Kết quả: 10 tham số "giả định" → ~2 tham số "đo được". Không adaptive online, không μ·g·R trong lib/drive. (ticket 17, 23)
-- **Mission FSM (F3):** enum `RunMode` trong drive types; switch ~10 dòng mỗi shell; không `MissionController`.
-- **Chiến lược 2-pass (F4) — chạy đúng giới hạn bám:** Run 1 dò map loại bỏ uncertainty — reactive phải chạy DƯỚI √(μgR) (để biên an toàn), còn ta chạy ĐÚNG √(μgR) nhờ map. Bốn phần mềm để đạt: **(1)** `speed_limit(κ)` đo theo độ cong thay grip-theo-steer cũ (ticket 23); **(2)** `brake_limit` đo thật thay `decel_per_tick` giả định (ticket 23); **(3)** map `line_curve[t]` thuần tách khỏi `planned_steer` (ticket 24); **(4)** offset profile `d[t]` racing-line 1.5-D (ticket 25 — luật đã rõ: cắt line = "đi tắt qua đoạn line khác"; offset trên CÙNG đoạn line hợp lệ). Track có thẳng + S-curve + góc 90° (FAQ Q-12) → đoạn thẳng làm phanh "đắt", nên offset/racing-line càng có giá trị.
-- **Phân rã module (as-built):** `lib/drive/` (control thuần, dimensionless: `step`/`plan`/types) · `lib/sensing/` (chân lý cảm biến + chuẩn hóa vật lý→dimensionless: `kIrOffsetsMm`, `kTofRangeMm`, `normalize_ir`, `normalize_tof`) · `src/sim/` · `src/esp32/`. Kernel không phụ thuộc sensing; cả 2 adapter tham chiếu sensing.
-- **Phân rã sim (5 module):** `TrackAsset` (sở hữu Image) · `WorldPhysics` (physical↔normalized) · `RaceArbiter` (trọng tài) · `Renderer` (view thuần) · `main` (loop + FSM ~40 dòng). Không SimEngine, không `get_*_mut()`, không raylib rò vào physics.
-- **State SSoT:** drive = `DriveState` (nhỏ, value-returned) + `RacePlan` (lớn, const-ref); sim = một physical state (WorldPhysics) + view const; xóa `RobotState`/`SimRobotState` trùng.
-- **Seam:** `Readings`/`DriveCommand` là hợp đồng duy nhất giữa drive và 2 adapter (adapter thật: 2 implementation, không phải seam giả định).
+`Drive` không chỉ forward một lời gọi: nó gom các invariant conversion/output vốn nằm trong `robot.cpp`, được hai callers thực dùng. `RaceTrial` không phải episode manager tổng quát: chỉ giữ một chỗ cho orchestration Robot + sim mà GUI và kiểm thử hai lượt hiện đang cần. Không tạo thêm lớp bọc cho mỗi operation.
 
-## Quyết định ghi nhận (Audit & As-built)
+## 3. Cấu trúc thư mục đích
 
-Các quyết định phát sinh trong quá trình triển khai + audit clean-code:
+Đây là **layout đề xuất**, không phải danh sách file đã tạo. Chỉ tạo file training/model khi đến slice có caller thật.
 
-- **AS-1 — Thư viện JSON: nlohmann-json.** Manifest track (`assets/*.json`) parse bằng `nlohmann::json` (`#include <nlohmann/json.hpp>`, hệ thống tại `/usr/include`). **Chỉ dùng trong sim** (`TrackAsset`); drive và esp32 không phụ thuộc. Thay cho parser tay ~70 dòng.
-- **AS-2 — Module `lib/sensing/`:** shared sensing model — chân lý cảm biến dùng chung (`kIrOffsetsMm`, `kIrHalfSpanMm`, `kTofRangeMm`) + chuẩn hóa thuần vật lý→dimensionless (`normalize_ir`, `normalize_tof`). Cả sim lẫn esp32 tham chiếu cùng một nguồn; layer base, không phụ thuộc gì. (Tên cũ `layout` đặt theo nội dung — đổi sang vai trò.)
-- **AS-3 — Hạ tầng lint:** thêm env `lint` trong `platformio.ini` (gộp mọi include path `lib`/`src/sim`/`src/esp32`/`test`) để `compiledb` sinh `compile_commands.json` đầy đủ cho clang-tidy (khắc phục lỗi file test không có compile command).
-- **AS-4 — Chính sách clang-tidy:** 0 warning là bắt buộc. Tắt `cppcoreguidelines-pro-bounds-avoid-unchecked-container-access`, nhất quán với 3 check pro-bounds đã tắt sẵn (dự án chấp nhận `vec[i]` không kiểm biên vì hiệu năng realtime).
-- **AS-5 — sentrux layers:** `sim`(1) · `esp32`(1) · `drive`(2) · `sensing`(3); số nhỏ = tầng trên (được phụ thuộc tầng dưới). Thay config cũ tham chiếu `lib/{system,control,track,math,config}` đã xóa.
-- **AS-6 — Tích lũy encoder không-thứ-nguyên:** adapter sim tích lũy quãng đường bánh bằng `float` (mm) rồi mới cast sang tick cho `Readings`, tránh cắt cụt về 0 khi increment < 1 tick (500Hz) làm encoder đóng băng.
-- **AS-7 — Tinh giản (code-simplification):** `std::clamp` thay `clampf` tự viết; hằng có tên cho magic number (`kSafetyTrim`, `kRobotRadiusMm` suy từ half-len/width, `kPi` dùng chung); tách `steer_evasion`/`smooth_obstacle_side`/`bake_throttle`/`clip_slab`; bỏ nested ternary và vòng `i-- > 0`; hàm `check()` thay macro `do-while` trong test.
-- **AS-8 — Comment convention:** câu nối tiếng Việt, thuật ngữ SSoT giữ nguyên tiếng Anh; cấm decoration (`// ---` banner, `// namespace` đóng) và restate-name; giữ comment why/đơn vị/range. (ticket 13)
-- **AS-9 — Xóa `TofResult`:** `TofResult.{danger,side}` trùng `Readings.obstacle_danger/obstacle_side`; `normalize_tof` ghi thẳng vào `Readings&`, gộp 3 hằng `300.0f` về `sensing::kTofRangeMm`. (ticket 15; vị trí normalize chốt ở `sensing` — ticket 19)
-- **AS-10 — Mission FSM ở shell (REVERT ticket 16):** không `mission.hpp`/`MissionController`; FSM ~10 dòng mỗi shell theo D3. (ticket 20)
-- **AS-11 — Layout một nguồn chân lý:** `kIrHalfSpanMm = kIrOffsetsMm.back()`; xóa `RacePlan::empty()`, dead-clamp trong `drive_motors`, `deg2rad` 1-caller, 7 handle global rời. (ticket 14)
-- **AS-12 — Tooling (REVERT ticket 18):** compile DB **tách riêng** — `compiledb` native-only; esp32 để clangd mờ (chấp nhận blurry). Một DB không phục vụ 2 ABI (host glibc vs xtensa newlib). esp32 lint = cppcheck. (ticket 22)
-- **AS-13 — `Tuning` tách 2 lớp:** giữ `Tuning { RobotTuning robot; TrackTuning track; }` trong `types.hpp`; KHÔNG giữ `drive/tuning.hpp` (derive/trim speculative — viết lại khi có calibration thật). (ticket 17, 21)
-- **AS-14 — speed_limit(κ) + brake_limit không-thứ-nguyên (bỏ μ khỏi mọi thứ trừ oracle):** grip theo steer (`corner_limit` cũ) → hàm `speed_limit(κ)` (bảng/đường trơn theo độ cong, nội suy); `decel_per_tick` giả định → `brake_limit` đo thật, trong `tuning.robot`/`tuning.track`; `plan_speed()` lookup cả hai. Index là ĐỘ CONG (geometry), không phải steer (control). Đo on-robot bằng một mode calibration (circle test + phanh gấp + phát hiện trượt qua gyro/encoder/line-loss) trên sàn thi, lưu NVS. IMU (MPU6050) thành peripheral, gyro dùng làm sensor trượt. μ/g/R không vào lib/drive. (ticket 23)
-- **AS-15 — Geometry tách khỏi control signal:** `planned_steer[t]` (tín hiệu lái, gồm nhiễu PD) không phải geometry. Ghi `line_curve[t]` = độ cong thuần (low-pass) để Run 2 feedforward sạch + PD nhẹ. (ticket 24)
-- **AS-16 — Offset profile d[t] (racing line 1.5-D):** lệch ngang `d[t]` ≤ sensor span (line vẫn dưới robot), suy trong `plan_speed` từ `line_curve` + `speed_limit` + `brake_limit`; Run 2 chạy `line_offset` setpoint = `d[t]`. KHÔNG cần pose 2D. Luật (FAQ Q-15): "cắt line = đi tắt qua đoạn line KHÁC" → DNF; offset trên CÙNG đoạn line không phải cắt, hợp lệ. Làm sau 23+24. (ticket 25)
-- **AS-17 — Thực tế cuộc thi (docs/fqa.csv):** track = thẳng + S-curve + góc vuông 90° (Q-12); vật cản = gạch 205×95×95mm đặt **trên tim line** (Q-13) → né vật cản là detour bắt buộc off-line rồi bám lại CÙNG line (Q-15: hợp lệ); cắt line = "đi tắt qua đoạn line khác" = DNF, KHÔNG còn giới hạn 5s off-line; sân ngoài trời có gió/ánh sáng (Q-16) → IR cần chống nhiễu ambient; đích = chạm ô đích, cảm biến tự dừng giờ (Q-17/18).
-- **AS-18 — Continuous line belief:** line-following là niềm tin liên tục (`line_certainty` + `line_estimate`), không phải if/else + ±1. Mất vạch → giữ `line_estimate` (đi thẳng theo tiếp tuyến), không slam — fix bug xoay vòng. Heading ψ (IMU) để sau. (ticket 26)
-- **AS-19 — Naming (Linux-style):** tên = việc robot làm, không phải lý thuyết; lý thuyết trong comment/implementation. Bỏ `docs/CONTEXT.md` + 8 thuật ngữ cũ (RawTrace/...). Quy ước ở `docs/NAMING.md`; đổi tên code ở ticket 27.
-- **AS-20 — Thiết kế UI/UX mô phỏng: Neutral Telemetry + Video Playback Scrubber (ticket 05):** Single-focus Smooth Chase Camera (~1.5× scale) + phím `[C]` đổi Macro Overview; thanh tiến độ 1D đáy màn hình tích hợp video playback scrubber tua frame-by-frame (`Space` pause, phím mũi tên tua, kéo chuột, `[,]`/`[.]` tốc độ); 8 micro-LEDs IR cản trước + 3 nón ToF FoV 25° (bán kính 300mm); Heatmap Ribbon Run 1 (tốc độ backward-pass) + Ghost Car Run 1 ở Run 2; hot-swap sa bàn qua phím `[Tab]` (Vòng Loại 6m ↔ Chung Kết 10m); hot-reload `tuning.json`; bảng màu Neutral công nghiệp (Matte Charcoal `#0e1013`, Zinc `#fafafa`, Amber `#f59e0b`), cấm drawer/sidebar để tối ưu không gian ngang sa bàn 10m.
+```text
+justfile                          dispatch các công cụ chuẩn
+README.md                         mục đích, điểm bắt đầu, links
+.clang-format / .clang-tidy
 
-- **AS-21 — First-principles tuning (zero hand-tuned constants):** Mọi tham số `Tuning` chỉ thuộc 1 trong 3 loại: SUY (hình học+dt) · ĐO (calibration once) · XÓA (thay bằng luật vật lý). Plant line-following `ë = (v²/(L·s))·u` → `steer_kp/steer_kd` KHÔNG là hằng số: pole-placement ζ=0.7 cho `kp = ωn²·L·s/v²`, `kd = 2ζωn·L·s/v²`, **schedule theo v** (encoder). Hai trần tốc độ độc lập: **tracking** `v ≤ ωn·√(s·L·budget/|κ|)` + **friction** `v ≤ √(μg/|κ|)`, chạy `min` (mất vạch ở cua = vượt trần tracking, không phải trượt lốp). `speed_limit(κ)` = bảng đo slip-boundary (circle-test đến trượt); `brake_limit` = a_brake·dt/v_max; `avoid_slowdown` → luật phanh `v²≤2·a_brake·d`; `avoid_strength` → detour side-commit; `offset_gain` → `argmin ∫ds/v`; `sprint_scale` → 1.0; `base_throttle` → error-budget speed (`|line_offset|≤0.5`); `obstacle_window` = ceil((ToF_range+half_len)/tick_len). Còn 3 lựa chọn hợp pháp: ζ=0.7, margin 0.9, ωn (chặn bởi motor bandwidth). IMU optional: gyro → ψ sạch + slip detection; không gyro → ψ̂=de/ds; chiến thuật không phân nhánh theo IMU. Xem tickets 33–37.
+docs/
+  ARCHITECTURE.md                  thiết kế và contract
+  NAMING.md                       quy ước tên duy nhất
+  PLAN.md                         công việc, regression, trạng thái
+  IMPLEMENTATION.md               bằng chứng mới chạy, giới hạn
+  decisions/                      quyết định và lịch sử
+  research/                       nghiên cứu, không phải implementation
 
-## Quyết định tối ưu hóa (cpp-pro audit) — Ticket `issues/07..12`
+firmware/
+  platformio.ini                  native GUI/tests/evaluator và ESP32 deferred
+  CMakeLists.txt                  entry ESP-IDF, milestone riêng
+  assets/                         các track fixtures hiện có
+  lib/
+    robot/
+      robot_data.hpp              dữ liệu chung; không include Robot/Race
+      drive.hpp / drive.cpp       conversion + output safety dùng chung
+      robot.hpp / robot.cpp       scoped facade/owner, interface platform
+      race.hpp / race.cpp         lifecycle, controller, memory; private
+      route.hpp / route.cpp       acquisition-time estimate + bounded prefix map; private
+  src/
+    CMakeLists.txt                registration ESP-IDF, không native frontend
+    sim/
+      simulation.hpp / simulation.cpp    engine: track borrow, clock, run
+      world_physics.hpp / world_physics.cpp
+      track_asset.hpp / track_asset.cpp
+      referee.hpp / referee.cpp
+      robot_geometry.hpp          fixture geometry + calibration mapping
+      race_trial.hpp / race_trial.cpp    Robot + Simulation composition
+      trial_frame.hpp             frame/trace để quan sát
+      renderer.hpp / renderer.cpp
+      main.cpp                    ghép session + trial + GUI
+    train/                        chỉ thêm khi triển khai thử nghiệm RL
+      environment.hpp             adapter operation RLtools theo đúng upstream
+      train.cpp                   entry training C++
+      evaluate.cpp                entry chấm checkpoint trên tập giữ riêng
+    esp32/
+      main.cpp
+      sensors.hpp / sensors.cpp
+      actuators.hpp / actuators.cpp
+  test/
+    test_robot.cpp
+    test_sim_runtime.cpp
+    test_sim_trial.cpp            pose/reset/lifecycle nhỏ, không full-race gate
+    test_training.cpp             chỉ thêm khi có environment/export thực
 
-- **OPT-1 — ESP32 = ESP-IDF + FreeRTOS, bỏ Arduino:** `framework = espidf`; vòng điều khiển là FreeRTOS task pin core 1, `vTaskDelayUntil` chu kỳ **cố định 2ms** (500Hz thật, `dt` hằng). Arduino `delay()` + `micros()` (jitter, thực tế ~350–400Hz) bị loại.
-- **OPT-2 — ADC-DMA:** 8 kênh IR đọc qua ADC continuous DMA (nền, ring buffer) thay `analogRead()` blocking (~0.5ms/tick).
-- **OPT-3 — PCNT:** encoder đếm quadrature phần cứng (chiều + ×4) thay `attachInterrupt` SW ISR (rớt xung, không biết chiều).
-- **OPT-4 — MCPWM:** điều khiển cầu H bằng MCPWM (2 đôi complementary + dead-time) thay LEDC.
-- **OPT-5 — ToF + cảm biến đích:** I2C master driver + VL53L0X (XSHUT sequencing GPIO 13/14/21 cho 3 cảm biến); cảm biến đích thật thay `finish_detected = false`.
-- **OPT-6 — Kernel static allocation:** `RacePlan` dùng fixed-capacity (không `std::vector::resize` trong vòng 500Hz); dung lượng tối đa theo chiều dài sa bàn (≤ 10000 mm → ≤ ~12k tick × 3 mảng).
+hardware/                         giữ nguyên nguồn CAD/cơ khí hiện có
+``` Không thêm `common/`, `utils/`, `interfaces/`, `controllers/`, thư mục cho từng test hay file model rỗng. Không di chuyển/xóa hardware hoặc dữ liệu nguồn trong đợt refactor này.
 
-**As-built (build đã verify):** `framework = espidf` — **ESP-IDF 6.1**, bỏ hẳn Arduino.
-- OPT-1 ✅ FreeRTOS `vTaskDelayUntil` 2ms, task pin core 1 (entry `app_main`)
-- OPT-3 ✅ PCNT quadrature (`driver/pulse_cnt.h`, API mới)
-- OPT-4 ✅ MCPWM 2 cầu H 20kHz (`driver/mcpwm_prelude.h`)
-- OPT-5 ✅ I2C master mới (`driver/i2c_master.h`) + XSHUT + VL53L0X single-shot (init đầy đủ = TODO phần cứng; finish pin giả định GPIO22)
-- OPT-2 ⚠️ `esp_adc/adc_oneshot.h` — `adc_continuous` (DMA) có sẵn trong IDF 6.1 nhưng chưa dùng (oneshot đơn giản trước)
-- OPT-6 ✅ Kernel fixed-capacity
+`robot_data.hpp` là header dùng chung có consumers thật, không phải phục hồi package `robot_contract`. Nó giữ các type khác nghĩa, không ép chúng vào một `RobotState`. `race.hpp` không phải interface của platform; header cùng folder không có nghĩa mọi caller được dùng private representation.
 
-`src/CMakeLists.txt` riêng để espidf chỉ biên dịch `esp32/*` (không `src/sim`). Build ESP32-S3 cần venv `uv` (`.venv`) + `pio` từ venv; env esp32s3 cần `build_unflags = -std=gnu++11` + `-std=gnu++17` (framework ép C++11 → thiếu `std::clamp`).
+`train.cpp` và `evaluate.cpp` dùng chung `environment.hpp`; không thêm thư mục `training/include/src`. Tham số, seed, kết quả và checkpoint của mỗi thử nghiệm nằm trong output build/experiment được ignore, không trộn với code hoặc assets nguồn. Chỉ quản lý model được chọn và test vectors cần triển khai khi có model thật; không tạo sẵn cây artifacts.
 
-## Testing Decisions
+## 4. Dependency và build
 
-- Test qua facade `step` (tích hợp hành vi) + trực tiếp internal seams (math thuần). Không mock, không ODE solver tổng hợp.
-- **Bất biến:** line centering (zero error → thẳng, cân bằng); deflection (error dương → lệch lái ngược chiều kim); anti-saturation (không clip duty); proximity deflection (danger dịch setpoint mượt); finish latch; backward-pass (giảm ga trước cua); replay (thẳng tăng tốc, cua giảm).
-- **Profile-feasibility oracle test:** sim tính `v_max[s]` vật lý (μ·g·R) → chuẩn hóa → assert `speed_limit[tick]` của drive ≤ `v_max` tương ứng. Chứng minh drive không đòi vượt giới hạn vật lý.
-- `just test` (drive unit) + `just sim-test` (headless 2 run) đều < 1s, không GUI.
-- **Chống regression:** một namespace `lf::drive`, không alias rải rác (lỗi `lf::RobotMode` cũ).
+Mũi tên dưới đây nghĩa là **phụ thuộc**, không phải luồng tín hiệu:
 
-## Out of Scope
+```text
+lf_robot_data                     chỉ header dữ liệu
+  ↑          ↑         ↑
+lf_drive   lf_simulation          không phụ thuộc lẫn nhau
+  ↑          ↑
+lf_robot     │                    Robot + Race; dùng lf_drive
+  ↑          │
+  └── lf_race_trial ───┘          ghép hai module, không Raylib
+           ↑
+       GUI / test_sim_trial
 
-- Quy hoạch quỹ đạo 2D / QP / replan đường vòng vật cản.
-- μ·g·R trong drive (chỉ oracle trong sim).
-- Telemetry/UDP/wireless dashboard.
-- Track editor, toast manager, input controller.
-- Calibration nghi thức (fit μ, a_brake).
-- Adaptive control online.
-- Hardware PCB/schematic.
+trainer + environment ──→ lf_drive + lf_simulation + RLtools
+ESP32 session ──────────→ lf_robot + platform drivers
+renderer ──────────────→ dữ liệu frame/track + Raylib
+```
 
-## Further Notes
+Tên targets chỉ để khai báo build, không tạo package/folder tương ứng:
 
-- **Tái thiết từ con số 0:** code cũ (~4600 dòng, 24 file) bị thay thế, không di trú từng phần.
-- **As-built:** 23 file / ~1637 dòng — drive 5 · sensing 1 · sim 10 · esp32 5 (main + sensors + actuators) · test 2.
-- **Trạng thái verify:** `just format-check` ✅ · `just lint` **0 warning** ✅ · `just test` ✅ · `sentrux check` ✅ · `just sim` build ✅ · **`just upload`/ESP32-S3 build ✅** (`framework=espidf`, ESP-IDF 6.1; cần venv `.venv` có pip).
-- **Issue mở (→ `docs/ROADMAP.md` mục 4):** `just sim-test` — Run 1 PASS (40.46s), Run 2 DQ (LINE LOST) do feedforward/speed-envelope.
-- **Đợt audit clean-code (tickets 13–18): DONE — sau đó refactor đính chính (tickets 19–22).** Giữ lại: comment hygiene (13), delete dead-code + micro-DRY (14), xóa `TofResult` (15), `Tuning` tách 2 lớp (17-struct). Đính chính: `layout`→`sensing` + normalize về đúng lớp (19), bỏ `mission.hpp` (20), bỏ `tuning.hpp` (21), tách compile DB chấp nhận blurry (22). Chi tiết: `docs/decisions/`.
-- **Tickets 23–27: DONE (software).** (23) `speed_limit(κ)` + `brake_limit` — cấu trúc xong, calibration on-chip + IMU chờ phần cứng; (24) ghi `line_curve[t]`; (25) offset profile `d[t]` (placeholder); (26) continuous line belief (bỏ if/else ±1); (27) rename Linux-style. `just check` + build 2 env xanh; `sim-test` vẫn DQ (chấp nhận, robot đi xa hơn hẳn). Chi tiết: `docs/decisions/`.
-- **Tickets 28–30: DONE (Sim DRY/KISS Audit & SSoT).** (28) `TrackRules` thay thế `RaceArbiter` làm SSoT duy nhất giám sát luật & chốt vòng đua (khi dừng hẳn trong đích, dừng sớm có lý do khi DQ); (29) Khử 100% nested if bằng guard-clauses & early returns; (30) Phân rã God Renderer (`draw_hud` → 3 sub-docks, tách ghost chassis, đổi tên Linux-style `poll_*`). `just check` xanh 100% (0 errors, 0 warnings); `just sim` build sạch; `test_sim` dừng chính xác tại bước va chạm (10180 steps). Chi tiết: `docs/decisions/`.
-- **Tickets 31–37: DONE (HUD + first-principles tuning).** (31) HUD rem-scale; (32) curvature viz (Predictive Arc + Apex ribbon); (33) kp/kd pole-placement + gain-scheduling (xoá `steer_kp/kd`); (34) `speed_limit` bảng đo (xoá `corner_limit`) — calibration on-robot chờ phần cứng; (35) Run 1 speed = envelope đo + error-budget (xoá `base_throttle/sprint_scale`); (36) obstacle state machine `kIdle→kBrake→kCommit→kRejoin` (xoá `avoid_strength/slowdown`) — sim obstacle còn va chạm; (37) `heading_rate` optional — **phát hiện: gyro tích ψ là positive feedback**, nên ψ từ `de/ds`, gyro dành slip detection. `just check` 0 warning + build 2 env + sentrux xanh. **`sim-test`: Run 1 PASS 40.46s, Run 2 DQ (LINE LOST)** — nợ điều khiển feedforward/speed envelope. Việc còn dở: `docs/ROADMAP.md`.
+| Target | Sources/trách nhiệm | Dependencies |
+|---|---|---|
+| `lf_robot_data` | INTERFACE của `robot_data.hpp` | C++17, include path; không `.cpp` |
+| `lf_drive` | `drive.cpp` | data; không Robot/Race/OS |
+| `lf_robot` | `robot.cpp`, `race.cpp`, `route.cpp` | Drive + data; không simulator |
+| `lf_simulation` | simulation/world/referee/track sources | data; PNG/JSON ở implementation loader |
+| `lf_race_trial` | `race_trial.cpp` | Robot + Simulation; không Raylib/RLtools |
+| GUI executable | main + renderer | trial, frame/track, Raylib |
+| Train/evaluate executables | entry + environment | Drive + Simulation + RLtools; chưa tạo mặc định |
+
+`Race` owns `Route`: wheel/pose histories 64 entry, pending acquisition 32, hai curve 1024 điểm và 16 vùng ToF. Line acquisition order, nominal body arc và absolute axle travel là ba tọa độ khác nhau; không biến gap thành độ dài line đã biết. No-return không xóa occupied evidence; association chưa chắc chỉ được giữ bao hợp. Map giữ qua prepare, reset session mới xóa. Overflow/correspondence không hỗ trợ được báo tường minh. Các bounds còn conditional free-rolling; recorded path chưa phải free-space certificate và controller hiện chưa dùng map cho navigation.
+
+Engine được phép load assets khi setup; JSON/PNG không nằm trong control tick hoặc public data header. Không nhập `lf_robot` chỉ để có include directory. `test_sim_runtime` chỉ link engine, không link Robot/Drive/trial; test thật bằng motor output cố định thay vì stub controller.
+
+`firmware/platformio.ini` giữ source filters explicit cho GUI, evaluator và từng test; engine tests không compile controller. Theo [ADR-015](decisions/ADR-015-build-and-hardware-verification.md), pkg-config được khai báo trực tiếp trong PIO; sanitizer thêm flags và dùng build directory riêng, không hook Python tùy biến. Các recipe `just` gọi PlatformIO CLI, gồm compile database và ASan/UBSan; root CMake đã bỏ. Không mỗi module một `CMakeLists.txt`/`library.json`, không thêm frontend native khác. Chưa có recipe training thì không mô tả nó là lệnh dùng được. CMake nội bộ ESP-IDF do PIO quản lý, không là frontend thứ hai.
+
+Project dùng C++17 và `-Wall -Wextra -Wpedantic`, không nâng lên C++20/23 theo skill. Warning policy/sanitizer đặt theo target; dependency bên thứ ba không chịu format/naming của project. Không để RLtools full target lan `-ffast-math`/`-march=native` sang safety hoặc firmware. Pin dependency lúc thực hiện thử nghiệm, không thêm dependency ngay trong đợt thiết kế.
+
+## 5. Contract Simulator: dữ liệu vào/ra, không callback
+
+Các operation sau mô tả interface cần triển khai, không phải declaration đã tồn tại:
+
+| Operation | Contract |
+|---|---|
+| Bind track ở setup | Caller load/validate bằng `TrackAsset::load`, giữ asset bất biến rồi cho Simulation borrow const. Lỗi load trả rõ trước khi thay world; đổi track kết thúc trial/Robot session cũ. |
+| `prepare_run` | Chỉ giữa các lượt: đặt pose/velocity/motor/cảm biến vật lý về điều kiện đầu, reset referee, chuẩn bị packet mới. Chưa tính là một lượt đã chạy; không gọi Robot hoặc xóa memory của nó. |
+| `start_run` | Commit lượt đã chuẩn bị sau khi caller chấp nhận start; bắt đầu thời gian/kết quả của lượt. Không tự hỏi `Robot::observe()`. |
+| `advance` | Nhận `MotorOutput`, tiến đúng một logical tick, tích phân với deadline thực, cập nhật acquisition/referee rồi publish snapshot hoàn chỉnh. Idle tick dùng output disabled; không tính thời gian idle vào race. |
+| `stop_run` | Kết thúc một lượt đang chạy với lý do từ công cụ như abort/timeout; không đổi verdict terminal đã chốt. Referee tự chốt kết quả theo thế giới. |
+| `observe` | Đọc const snapshot đã publish; không tiến clock, không lấy mẫu lại và không gọi controller. |
+
+`Simulation` owns world/referee/clock và chỉ borrow track/geometry bất biến. Caller setup owns assets lâu hơn mọi Simulation/episode dùng chúng; không reload/mutate asset đang được borrow. Nó không owns trace GUI, `RobotObservation`, request của controller hoặc RL network. Nó xử lý một lượt tại một thời điểm; quota hai lượt và tổ hợp kết quả nằm ở RaceTrial, không trong engine. Quy tắc thi có bao nhiêu lượt không thay đổi physics.
+
+Snapshot engine, tên đề xuất `WorldObservation`, giữ thời gian, pose thật, packet `SensorMeasurements`, kết quả referee và identity của world/run. Reference tới snapshot chỉ dùng đến lần mutate engine tiếp theo; recorder/state history phải copy giá trị cần giữ, không giữ reference rồi đọc sau `advance`. Ground truth ở đây chỉ dành cho renderer, reward và bộ chấm; không truyền cả struct cho actor. Actor chỉ nhận projection từ đường sensor đã định nghĩa.
+
+Collision detector trả sự kiện hình học, không tự đồng nghĩa DNF; Referee phải áp dụng luật, gồm ngoại lệ tiếp xúc theo FAQ Q-14. Luật finish/timing/đẩy vật cản chưa rõ hoặc chưa mô hình hóa phải báo là giới hạn, không suy ra race hợp lệ chỉ vì không có collision.
+
+`advance` ở engine kiểm tra format motor, finite/range/mode và deadline như actuator thực, kể cả caller cố tình không qua Drive. Đây là validation ở hai trust seams khác nhau: engine/actuator không được tin caller; Drive bảo đảm hành vi robot/training nhất quán. Không viết một controller "an toàn hơn" bên trong physics để che action sai.
+
+### Clock và thứ tự một tick
+
+Với packet tại `t`, output có hiệu lực trên `[t, t + dt)`:
+
+1. Caller đọc packet đã cache tại `t`; Drive chuẩn hóa, giữ nguyên timestamp/sequence theo nguồn.
+2. Robot hoặc actor tạo demand; Drive tạo output có deadline theo clock đó. Chỉ một quyết định cho packet này.
+3. Engine tích phân output đến deadline hoặc cuối tick; phần còn lại phải disabled theo actuator contract, không kéo dài hiệu lực ngầm.
+4. Tại `t + dt`, engine cập nhật acquisition theo cadence, chấm referee, chốt terminal nếu có rồi publish packet/snapshot mới.
+5. Caller ghép bản ghi quyết định tại `t` với outcome tại `t + dt`. Nếu terminal thì không gọi Robot/actor thêm để làm đẹp trace.
+
+`Simulation` là chủ logical clock; GUI accumulator chỉ quyết định chạy bao nhiêu tick. Pause/scrub không mutate world/Robot; UI requests được xử lý tại tick có kiểm soát, không gọi `drive` thêm lần nữa ở cùng timestamp. Đọc lại snapshot không sinh sequence mới. Mẫu ToF giữ timestamp cũ cho đến lần acquisition tiếp theo.
+
+`prepare_run` là discontinuity có chủ đích giữa lượt, không phải bước vật lý: clear output còn hiệu lực và reset physical state. Clock của **cùng Robot session** vẫn monotonic; scheduler phải dành packet decision mới cho request start/retry, không tái dùng timestamp đã gọi Robot. Simulation session mới có thể bắt đầu clock mới cùng một Robot session mới; không giữ Robot cũ qua việc tua ngược thời gian.
+
+## 6. Core C++: ownership, preprocessing và an toàn
+
+`run_robot(calibration, session)` tiếp tục owns typed private `Robot::State` theo lexical lifetime; State owns Drive + Race bằng value. Robot không copy/move, không heap-PIMPL, singleton, caller buffer hoặc `void*`. Session chỉ borrow; mọi RaceTrial tham chiếu Robot phải được dựng và hủy bên trong callback. C++17 không tự ngăn reference escape; cần review và sanitizer. Disable khi callback return không thay watchdog chống stall.
+
+`Drive` là module core không I/O, giữ calibration bất biến và history normalization có giới hạn. Interface dự kiến gồm `read_sensors`, `drive_motors`, `prepare_run` và đọc fault. Tên nói việc thực hiện, không expose optimizer/filter/controller theory. Các method phải trả dữ liệu/fault rõ, không âm thầm chuyển lỗi calibration, clock hay motor thành kết quả thành công.
+
+- `read_sensors`: physical measurements → normalized readings, kiểm tra monotonic time, finite/range, status/age, counter wrap/delta. Có chính sách freshness theo nguồn, không đòi mọi cảm biến cập nhật đồng thời. Những ngưỡng chưa đo là điểm chưa chốt, không default giả.
+- `drive_motors`: demand + trạng thái được phép chạy → output có physical deadline; không gia hạn demand từ dữ liệu hết hiệu lực như bình thường. Đầu ra lỗi phải disabled, kèm fault; không chỉ clamp NaN/range để giấu lỗi policy.
+- `prepare_run`: rebase encoder/per-run origin khi world hoặc robot được đặt lại; giữ clock history và calibration. Không xóa trí nhớ của Race.
+- Robot owns lifecycle/control memory; Drive không chứa path, first-run speed profile hoặc RL replay buffer. Không để trainer cập nhật trực tiếp status của Robot để vượt safety.
+
+Environment training là **module native khác**, được own Drive riêng và state episode của nó; nó không dựng, borrow private representation hoặc cấp storage cho `Robot::State`/Race. GUI/ESP32 vẫn chỉ đi qua Robot. Như vậy trainer dùng được preprocessing/output semantics mà không phải gọi controller baseline hoặc được mở quyền can thiệp Robot.
+
+Giữ nghĩa các type trong `robot_data.hpp`:
+
+| Type | Nghĩa |
+|---|---|
+| `SensorSample<T>` | Physical value, acquisition timestamp/sequence/status; thay tên `Acquired<T>` |
+| `SensorMeasurements` | Packet physical ở clock monotonic, giữ riêng từng kênh |
+| `SensorReadings` | Số đo normalized, age/elapsed time theo `T0`; không phải actor history hoặc mục tiêu |
+| `Calibration` | Nominal calibration được robot biết; `L0=wheelbase`, `V0=reference_speed`, `T0=L0/V0`, giữ nhất quán hai lượt |
+| `MotorDemand` | Yêu cầu motor với duration normalized |
+| `MotorOutput` | Duty/mode và physical absolute deadline |
+| `RobotObservation` | Telemetry có producer thật từ robot, không chứa pose/map thật của sim |
+
+Xóa `GeometryObservation` placeholder cùng assertion availability hiện có nếu vẫn không có production producer/consumer; giữ các test có nghĩa khác. Không ép physical/normalized, duration/deadline hoặc sample time/decision time thành một type vì muốn ít header.
+
+Không block/cấp phát động trong tick robot hoặc physics. Track allocation/PNG/JSON load, trace reserve và trainer setup diễn ra ngoài tick. Trace có capacity/overflow rõ; trainer không tự lưu vector dài ở mỗi environment. Weights triển khai read-only; activation/recurrent state có owner riêng, không mutable global. Training optimizer/replay có thể cấp phát trên host, không kéo chúng vào firmware.
+
+## 7. Hai lượt, kết quả và quan sát
+
+`RaceTrial` borrows Simulation + Robot, owns trạng thái orchestration và hai kết quả. Nó không owns Robot storage, không nhận diện loại controller và không chứa luật va chạm/finish thứ hai.
+
+1. Chuẩn bị world về start và thông báo chuẩn bị lượt cho Robot để rebase, không full reset trí nhớ.
+2. Trên packet mới, gửi start tới Robot; chỉ khi Robot chấp nhận mới commit start engine và tăng số lượt đã dùng. Start bị từ chối phải là rejected/not-run, không DNF giả; có regression cho failure của bước commit.
+3. Lặp một đường tick chung cho GUI/headless. Khi referee hoặc safety chốt dừng, không áp dụng thêm demand; thông báo kết thúc lượt cho core mà không đưa pose/collision map vào quyết định chuyển động.
+4. Lượt sau dùng cùng start conditions/calibration và history được phép giữ; counter origin rebase, clock không quay lại. Full session reset mới bỏ history toàn bộ.
+
+Các lệnh prepare/end-run là semantics cần bổ sung rõ vào request contract khi triển khai; không giả chúng đã có trong enum hiện tại. Tín hiệu start/stop của công cụ tương đương điều hành cuộc chạy, không được biến nhãn Completed/collision truth thành input chọn chuyển động chỉ có trong sim.
+
+DNF do referee/timeout không đồng nghĩa lỗi calibration hay lỗi nội bộ controller. Proposed policy: chỉ giữ prefix measurements thực sự đã ghi, có coverage/capacity rõ; không coi memory sau DNF là một vòng hoàn chỉnh. Safety fault không tự được gỡ bởi Start. Chính sách phục hồi fault/giữ prefix cần chốt và test trước slice lifecycle, không tự gán nghĩa cho `kReset` cũ. Hai lượt khác với các pass xử lý; vẫn giữ các biến đổi có thứ tự/contract cần thiết, không tạo pass-manager.
+
+`RaceTrial` aggregates Completed/DNF/Pending/rejected/not-run riêng, best time chỉ từ lượt hợp lệ; gain chỉ khi hai lượt hợp lệ và comparable, có thể âm hoặc 0. Engine không biết baseline hay neural. Reward không được dùng thay result schema hoặc safety.
+
+`SimFrame` là bản ghi quan sát do trial/observer tạo, không là acquisition input. Nó giữ identity, decision time, outcome time, physical measurements/output, telemetry robot và referee result với đơn vị rõ; không gắn pose sau tick vào nhãn thời gian trước tick. GUI dùng ToF physical cho mm/ray length, không coi normalized ToF là mm. Unavailable telemetry hiển thị N/A.
+
+Trace recording là tùy chọn ở caller vì GUI/playback cần còn headless training không cần. Một chỗ tạo frame đảm bảo verdict đã final trước khi record; terminal không sửa riêng current mà bỏ quên trace. Renderer giữ docks/camera/chassis/ghost/trails/palette/IR/heatmap, chỉ thay binding. Không yêu cầu người dùng mở GUI để thay kiểm thử tự động.
+
+## 8. RLtools ở đâu và không ở đâu
+
+Training C++ có vòng: sensor → Drive → actor → Drive → Simulation → reward/update. Chỉ `environment.hpp` cần tuân theo tên/type operation template của upstream; không đổi signature của thư viện để ép NAMING hoặc cho tên thuật toán lan ra domain interface.
+
+RLtools có contract `step(state, action, next_state)`: trạng thái tiến hóa phải nằm trong State tương ứng, không giấu một Simulation mutable dùng chung trong environment rồi bỏ qua `state`. State owns bản Simulation + Drive/history của episode; parameters giữ asset/nominal setup bất biến. Copy state chỉ copy phần world/referee/clock/sensor caches/history có giới hạn, không copy raster track, trace, weights hay replay buffer. Simulation/Drive cần value semantics độc lập thích hợp cho native state; Robot facade vẫn noncopyable. Cache/RNG/cadence cần để tái hiện phải có owner theo episode hoặc được truyền theo contract upstream, không singleton. Regression: bước từ cùng state/action/seed có cùng outcome, input state không bị sửa và hai environment không ảnh hưởng nhau.
+
+Actor nhận các kênh sensor hợp lệ, age/elapsed time và history/context được định nghĩa. Không nhận `WorldObservation`, tọa độ thật, centerline, vị trí gạch hoặc khoảng cách thật tới đích. Privileged critic nếu có phải tách rõ. Physics có thể tạo acquisition từ ground truth; reward/referee có thể dùng truth mà deployed actor không có.
+
+Nominal calibration robot được biết và tham số plant thật là hai thứ khác nhau. `robot_geometry.hpp` giữ fixture và mapping `simulated_calibration()` dùng chung, không copy ở GUI/test. Khi randomize plant, không tự cấp chính tham số sai lệch thực cho actor hoặc thay nominal calibration để triệt uncertainty. Ranges noise/latency/grip/motor phải có nguồn; seed tái hiện được, không biến fixture thành sa bàn bí mật.
+
+Chưa chốt thuật toán, observation vector, hidden size, recurrent state hoặc quantization. Hai output liên tục là phạm vi thử nghiệm đề xuất, không cam kết đủ cho chiến lược hai lượt. Enable/freshness checks và bound của command duration/deadline không phải action để actor học cách vượt safety; adapter dùng cùng quy tắc như Robot. Memory xuyên lượt cần episode/reset/training tương ứng, không tự có vì weights cố định. Chỉ thêm model/inference file khi có implementation dùng được; Race vẫn là chỗ quyết định chuyển động, không tạo controller chạy song song ở platform.
+
+Khi có learned policy dùng thật, thêm `motion.hpp/.cpp` trong core nếu cần để Race và trainer dùng chung việc pack observation, action scaling, model configuration/inference và reset state; không tạo file placeholder ở đợt thiết kế. RLtools vẫn owns optimizer/gradient trên host; core motion không chứa training loop. Weights có thể thay đổi ở trainer nhưng được chốt/read-only khi triển khai, buffers/history thuộc từng rollout hoặc Race, không share mutable state giữa episodes. Không viết một mạng/feature packing thứ hai trong `race.cpp` chỉ vì đó là firmware.
+
+Trong thử nghiệm giữ baseline để so sánh trên cùng sim đã sửa. Chọn implementation khi ghép/build executable hoặc trong harness thử nghiệm có phạm vi nhỏ, không yêu cầu firmware ship cả hai controller. Trước khi tích hợp model phải chứng minh chung preprocessing, action scaling, reset/history và output validation; không suy parity chỉ từ việc cả hai dùng RLtools. Nếu chọn learned controller, xóa logic baseline bị thay thế sau acceptance; nếu không đạt, bỏ experiment glue đã chết, không giữ framework dự phòng.
+
+Khả năng C++/export của RLtools đã được nghiên cứu trong [assessment](research/rl-tools-assessment.md), chưa có kết quả LF-Bot hoặc ESP32-S3. Chưa dùng backend DSP chỉ vì enum có S3. Host golden vectors, hardware inference latency/jitter/RAM/stack và safety/watchdog là acceptance riêng; native 2 ms tick không phải WCET proof.
+
+## 9. Tên và các phần phải cắt
+
+Theo [NAMING](NAMING.md): hàm là động từ việc làm; type là danh từ miền CamelCase; không đưa PD/pure-pursuit/TD3/GRU ra tên public domain. Tên thuật toán vẫn được dùng đúng trong implementation, dependency và config thử nghiệm; không đặt alias che giấu thư viện chỉ để đổi chữ.
+
+| Hiện tại | Đích/hành động |
+|---|---|
+| Ba package `robot`/`race`/`robot_contract` | Một `lib/robot/` phẳng; data header riêng, Race private |
+| `include/<module>/src`, module manifests/CMake | Bỏ sau cập nhật callers/build; PIO khai báo source filters |
+| `sim/runtime/` | Làm phẳng vào `sim/`, target tách sources engine/trial/GUI |
+| `Simulation::advance(Robot&, RaceRequest)` | Engine `advance(MotorOutput)`; Robot orchestration sang RaceTrial |
+| `Simulation` giữ trace/RobotObservation | Snapshot engine độc lập; frame/trace ở caller |
+| `TrackRules`, `track_rules.*` | `Referee`, `referee.*` |
+| `Acquired<T>` | `SensorSample<T>` |
+| `ControlModel` | Bỏ fields không đọc; geometry còn cần thì `RaceGeometry`, không generic model |
+| `planned_speed`, `observed_offset` | `choose_speed`, `measure_line_offset` nếu logic còn giữ |
+| `apply_memory` | Tách nghĩa ghi/dùng memory khi sửa implementation; không rename code sắp xóa hai lần |
+| `kHalfLengthMm` dùng làm ToF offset | Tên phản ánh offset ToF, không đổi số/hình học |
+| Geometry placeholder, getter/wrapper/config lặp | Cắt theo consumer audit trong PLAN; không cắt validation thật |
+
+Giữ `Simulation`, `WorldPhysics`, `Renderer`, `Race`, `Robot`: không rename toàn bộ vì có thiết kế mới. Không thêm một naming document khác. Không khôi phục custom architecture checker, negative fixtures, stack report plumbing hoặc OS migration.
+
+## 10. Chuyển đổi và tiêu chí kiểm chứng
+
+Mỗi slice tách mechanical moves khỏi behavior changes; mọi cut đi kèm cập nhật caller/build/docs. Không đổi constants/assertions để hợp thức hóa refactor.
+
+Đã làm ở slice 2026-10-19 (1–4 bên dưới); 5–6 còn mở:
+
+1. **Data/core phẳng và Drive dùng chung.** `firmware/lib/robot/` phẳng; ba package cũ, `library.json` và `include/src` đã xóa. `Drive` giữ conversion/clock/counter/output; Robot test vẫn đi qua `Robot::drive`.
+2. **Engine theo motor output.** `Simulation::advance(MotorOutput)`; orchestration ở `RaceTrial`; GUI và hai test đã chuyển. `test_sim_runtime` chỉ link `lf_simulation`.
+3. **Regression correctness/lifecycle.** Collision đủ bốn trục, gate overlap, freshness theo nguồn, ToF unknown không phải clear, đơn vị vật lý trong frame, verdict chốt trước khi record, reposition/rebase hai lượt, summary hai lượt, abort/reset/third-start.
+4. **Một nguồn build.** PlatformIO CLI dựng GUI, test, sanitizer và compile database theo ADR-013; root CMake đã bỏ. Registration CMake nội bộ ESP-IDF được giữ.
+5. **Environment và phép so sánh RL nhỏ.** Chưa có: cần environment RLtools dùng chung engine/Drive, kiểm tra action/observation không rò truth, nhiều seed và held-out tracks. Không bắt buộc hoàn thiện controller hình học trước thử nghiệm.
+6. **Acceptance riêng.** Còn mở: GUI offscreen/input/playback, CI full-race khi ổn định, ESP32 adapter/HIL và measured timing. Chưa có evidence thì giữ deferred/blocked, không tick pass vì build xanh.
+
+Các kiểm chứng quan trọng của interface mới: đọc snapshot nhiều lần không đổi world; mỗi tick đúng một quyết định; output hết hạn giữa tick; prepare không xóa memory; rejected start không tiêu lượt; abort/terminal không phát thêm action; trace verdict/time/units nhất quán; clock monotonic qua lượt hai; memory overflow và thiếu sensor có kết quả rõ.
+
+Dùng recipe `just` thực có trong [justfile](../justfile), theo [AGENTS](../AGENTS.md). Code đổi phải test/format/lint/build phù hợp; physics/control/lifecycle đổi phải chạy thêm runtime và regression nhỏ cho hành vi bị ảnh hưởng. Gate `sim-test` đã bỏ theo yêu cầu; kết quả full-race cũ chỉ là lịch sử, không suy race pass từ tests xanh. Đợt chỉ thiết kế kiểm tra links/diff/recipe references, không lấy test lịch sử làm bằng chứng kiến trúc mới đã pass.

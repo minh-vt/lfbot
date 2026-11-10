@@ -1,7 +1,9 @@
 # ADR-004: ESP32 toolchain — ESP-IDF + FreeRTOS, bỏ Arduino
 
 ## Status
-Accepted
+Accepted — lua chon ESP-IDF va FreeRTOS van duoc giu.
+
+Ghi chu tai thiet (2026-10-13): cac tan so, API, chan va trang thai trien khai duoi day la ghi chep cua thiet ke cu, khong phai thong so da xac minh cho codebase moi. Lap lich 2 ms khong tu bao dam hard real-time; so lieu so sanh jitter can phep do truoc khi su dung. Cau hinh build hien tai o [platformio.ini](../../firmware/platformio.ini); yeu cau timing/an toan o [ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## Date
 2026-10-12

@@ -1,59 +1,57 @@
-# LF-BOT Command Runner (tuong tu npm scripts)
+fmt_paths := "firmware/lib firmware/src/sim firmware/test"
+fmt_files := "\\( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \\)"
+suite := "-e test-robot -e test-route -e test-trial -e test-metrics"
+runtime := "-e test-runtime -e test-physics"
 
 default:
     @just --list
 
-# Chay mo phong Desktop Raylib
-sim:
-    cd firmware && pio run -e sim -t exec
+build-native:
+    pio run -d firmware -e sim {{suite}} {{runtime}}
 
-# Chay toan bo unit tests headless
+# These contracts are not evidence of obstacle bypass or track completion.
 test:
-    cd firmware && pio run -e test_core -t exec
+    pio run -d firmware -e test-robot -e test-route -e test-trial -t exec
+    pio run -d firmware -e test-metrics -t exec --program-arg=--self-test
 
-# Chay kiem thu mo phong headless 2 luot (Map & Sprint)
-sim-test:
-    cd firmware && pio run -e sim_test -t exec
+test-sim-runtime:
+    pio run -d firmware {{runtime}} -t exec
 
-# Kiem tra toan dien: format + lint (native + esp32) + test
-check: format-check lint test
+sim:
+    pio run -d firmware -e sim -t exec
 
-# Tu dong format toan bo ma nguon bang clang-format
+check: format-check lint test test-sim-runtime build-native
+
 format:
-    clang-format -i firmware/lib/*/*.hpp firmware/lib/*/*.cpp firmware/src/*/*.hpp firmware/src/*/*.cpp firmware/test/*.cpp
+    find {{fmt_paths}} -type f {{fmt_files}} -print0 | xargs -0 -r clang-format -i
 
-# Kiem tra format ma nguon (tra ve loi neu chua format)
 format-check:
-    clang-format --dry-run --Werror firmware/lib/*/*.hpp firmware/lib/*/*.cpp firmware/src/*/*.hpp firmware/src/*/*.cpp firmware/test/*.cpp
+    find {{fmt_paths}} -type f {{fmt_files}} -print0 | xargs -0 -r clang-format --dry-run --Werror
 
-# Kiem tra tinh ma nguon: clang-tidy cho native + cppcheck cho esp32
-lint: lint-native lint-esp32
+# Keep each compilation database separate: engine tests must not gain controller sources.
+lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for target in sim test-robot test-route test-trial test-metrics test-runtime test-physics; do
+      rm -rf "firmware/.pio/build/$target/compile_commands.json"
+      pio run -d firmware -e "$target" -t compiledb
+      cp firmware/compile_commands.json "firmware/.pio/build/$target/compile_commands.json"
+      (cd firmware && python3 -c 'import json, subprocess, sys; entries=json.load(open(sys.argv[1]+"/compile_commands.json")); subprocess.run(["clang-tidy", "--warnings-as-errors=*", "-p", sys.argv[1]] + [entry["file"] for entry in entries], check=True)' ".pio/build/$target")
+    done
+    cp firmware/.pio/build/sim/compile_commands.json firmware/compile_commands.json
 
-# clang-tidy cho code build duoc tren host (kernel, sensing, sim, test)
-lint-native:
-    clang-tidy -p firmware/compile_commands.json firmware/lib/*/*.cpp firmware/src/sim/*.cpp firmware/test/*.cpp
-
-# cppcheck cho firmware ESP32-S3 (IDF không parse được bằng clang-tidy host)
 lint-esp32:
-    cd firmware && pio check -e esp32s3
+    pio check -d firmware -e esp32s3
 
-# Tu dong ap dung cac fix cua clang-tidy va format lai code
-lint-fix:
-    clang-tidy -p firmware/compile_commands.json --fix --fix-errors firmware/lib/*/*.cpp firmware/src/sim/*.cpp firmware/test/*.cpp
-    just format
-
-# Tao lai database compile_commands.json (native-only; esp32 editor mờ — chấp nhận)
 compiledb:
-    cd firmware && pio run -e lint -t compiledb
+    pio run -d firmware -e sim -t compiledb
 
-# Nap chuong trinh xuong chip ESP32-S3
-upload:
-    cd firmware && pio run -e esp32s3 -t upload
+sanitize:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PLATFORMIO_BUILD_DIR=.pio/sanitize
+    export PLATFORMIO_BUILD_FLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all'
+    just test test-sim-runtime
 
-# Mo serial monitor ESP32-S3 (115200 baud)
-monitor:
-    cd firmware && pio device monitor -b 115200
-
-# Don dep cache PlatformIO
 clean:
-    cd firmware && pio run -t clean
+    pio run -d firmware -e sim -e evaluate {{suite}} {{runtime}} -t clean
