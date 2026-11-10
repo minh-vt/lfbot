@@ -20,7 +20,9 @@ ADRs ghi boi canh, lua chon va danh doi; [ARCHITECTURE.md](../ARCHITECTURE.md) m
 | [017](ADR-017-main-connectivity-placement.md) | Superseded by 019; giữ lịch sử placement | MAIN placement V1 theo connectivity, không đổi pinout/footprint/keepout |
 | [018](ADR-018-main-spaced-placement.md) | Superseded by 019; giữ lịch sử placement | Nhận placement V2; kiểm chứng OUT/return/thermal trước full routing, giữ envelope điện |
 | [019](ADR-019-module-based-hardware.md) | Accepted; firmware/hardware chưa kiểm chứng | Dừng PCB riêng; IR analog 8 mắt, hai DRV8871, pin 3S và pin map module |
+| [020](ADR-020-esp32-firmware-restart.md) | Accepted; chưa kiểm chứng trên board | Viết lại firmware ESP32, bỏ simulator/core cũ, calibration tại sân |
+| [021](ADR-021-field-adaptive-two-run-design.md) | Accepted; chưa triển khai | Một nút Start/Hủy, đích 8 mắt trắng có xác nhận, tự hiệu chuẩn tại sân, map lưu flash, đo pin |
 
-ADR-013 thay phần frontend native CMake của ADR-012. ADR-012 thay một phần ADR-009/010; các ADR đó vẫn Accepted và không bị xóa. [ARCHITECTURE](../ARCHITECTURE.md) mô tả thiết kế hiện hành, [IMPLEMENTATION](../IMPLEMENTATION.md) tách phần đã chạy khỏi phần còn thiếu.
+ADR-020/021 thay các phần simulator/core của ADR-009/010/012 và mô tả nút/đo pin của ADR-019. ADR-013 thay phần frontend native CMake của ADR-012. ADR-012 thay một phần ADR-009/010; các ADR đó vẫn Accepted và không bị xóa. [ARCHITECTURE](../ARCHITECTURE.md) mô tả thiết kế hiện hành, [IMPLEMENTATION](../IMPLEMENTATION.md) tách phần đã chạy khỏi phần còn thiếu.
 
 Giu so thu tu da dung; khong danh so lai de lap cac khoang trong. ADR cu duoc giu lam lich su, danh dau Superseded khi co quyet dinh thay the. Chi tao ADR cho lua chon co danh doi dang ghi lai; khong tao mot ADR cho moi ham hay file.

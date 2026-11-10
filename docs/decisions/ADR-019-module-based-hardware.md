@@ -1,6 +1,6 @@
 # ADR-019: Dừng PCB riêng, dùng module cho prototype 3S
 
-**Status:** Accepted theo quyết định của chủ dự án trong phiên làm việc 2026-11-10. Chốt phân bổ GPIO và cấu hình module; không phải nghiệm thu phần cứng hoặc firmware.
+**Status:** Accepted theo quyết định của chủ dự án trong phiên làm việc 2026-11-10. Mô tả nút và mạch đo pin được thay bởi [ADR-021](ADR-021-field-adaptive-two-run-design.md); phần “firmware chưa migrate” được cập nhật bởi [ADR-020](ADR-020-esp32-firmware-restart.md). Chốt phân bổ GPIO và cấu hình module; không phải nghiệm thu phần cứng hoặc firmware.
 
 ## Bối cảnh
 
