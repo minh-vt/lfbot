@@ -56,16 +56,17 @@ Khi nạp USB: ngắt nguồn pin và tháo dây **buck OUT+ -> ESP32 5V** để
 | 47 | Encoder phải B / C2 | Phải | Input logic 3,3 V |
 | 40 | Nút Start / Hủy | Phải | Nút nối xuống GND, input pull-up |
 | 41 | ToF SHUT / XSHUT | Phải | Open-drain: kéo thấp reset, nhả để chạy |
-| 39 | LED trạng thái (dự phòng) | Phải | Chỉ dùng nếu motor phát âm không đạt; khi đó không dùng IMU INT |
+| 39 | IMU INT | Phải | Dự phòng; ban đầu không nối |
+| 48 | LED RGB WS2812 trên board | — | Có sẵn trên board, chủ dự án xác nhận GPIO48 (2026-11-11). Kênh phản hồi trạng thái duy nhất; điều khiển bằng RMT |
 | 42 | ToF INT | Phải | Dự phòng; ban đầu không nối |
 
 Hai chân 3V3 nằm trên hàng trái; 5V gần cuối hàng trái. RST là reset, không phải GPIO. Các nhãn ADC/SPI/UART trên ảnh là chức năng có thể chọn: GPIO15/16 vẫn làm I2C, GPIO17/18 làm encoder và GPIO11–14 làm PWM được.
 
-Không dùng GPIO0/3/45/46 (strapping), GPIO19/20 (USB), GPIO26–37 (vùng bộ nhớ; đặc biệt 35–37 với Octal PSRAM), GPIO43/44 (giữ UART), GPIO38/48 (tránh LED RGB khác revision). Không chọn GPIO3 làm kênh IR dù nó có ADC.
+Không dùng GPIO0/3/45/46 (strapping), GPIO19/20 (USB), GPIO26–37 (vùng bộ nhớ; đặc biệt 35–37 với Octal PSRAM), GPIO43/44 (giữ UART, đang là console). GPIO48 dành cho LED RGB trên board; GPIO38 để trống. Không chọn GPIO3 làm kênh IR dù nó có ADC.
 
 ## IR 8 mắt và chia áp ADC
 
-D1–D8 của thanh được chọn là **analog**, không phải digital. Cấp VCC=3V3, GND chung. Định nghĩa thứ tự kênh robot từ trái sang phải theo hướng chạy; gá đảo thì firmware đảo thứ tự, không suy trái/phải từ ảnh nhìn mặt dưới thanh.
+D1–D8 của thanh được chọn là **analog**; nhìn theo hướng tiến (phía ToF), D1 ngoài cùng trái, D8 ngoài cùng phải (chủ dự án xác nhận 2026-11-11), không phải digital. Cấp VCC=3V3, GND chung. **Đo ngày 2026-11-10:** nối thẳng D1–D8 vào ADC, không trở chia áp (chủ dự án chưa có linh kiện); mức trắng đọc được khoảng 1880–2850 trên thang 4095 (khác nhau giữa các mắt), chưa kẹt đỉnh; số 3760–3990 ở lần đo đầu do đấu dây sai. Bản vẽ chia áp 10k/47k bên dưới **chưa được dùng**. Định nghĩa thứ tự kênh robot từ trái sang phải theo hướng chạy; gá đảo thì firmware đảo thứ tự, không suy trái/phải từ ảnh nhìn mặt dưới thanh.
 
 Từng kênh nối độc lập:
 
@@ -114,11 +115,11 @@ DRV8871 làm việc 6,5–45 V, nhận logic 3,3 V; 3,6 A là rating **đỉnh**
 | EDA, ECL | Để trống |
 | INT | Để trống ban đầu; GPIO39 được dành nếu triển khai ngắt |
 
-Dùng pull-up bus phù hợp 3,3 V, không chồng thêm tùy tiện lên pull-up có sẵn. ToF và IMU không trùng địa chỉ. Có module IMU không có nghĩa core hiện đọc gyro: `SensorMeasurements` chưa có kênh IMU; cần producer/consumer và tests trước khi sử dụng trong quyết định robot. Không tạo mẫu zero hợp lệ để lấp phần chưa triển khai.
+Dùng pull-up bus phù hợp 3,3 V, không chồng thêm tùy tiện lên pull-up có sẵn. ToF và IMU không trùng địa chỉ. **Đo ngày 2026-11-10:** module trả `WHO_AM_I=0x70`, tức chip **MPU-6500** (không có từ kế), dù tên bán là GY-9250. Gyro/accel đọc được qua I2C 0x68. Firmware nhận cả họ 0x70/0x71/0x73. Từ kế không được dùng. Không tạo mẫu zero hợp lệ để lấp dữ liệu thiếu.
 
 ## Nút và đo pin
 
-Nút nối GPIO40 với GND; input pull-up. Hành vi theo [ARCHITECTURE](../docs/ARCHITECTURE.md#2-vận-hành-bằng-một-nút): nhấn ngắn là Start (khi nhả tay), nhấn giữ là tự hiệu chuẩn, nhấn khi đang chạy là Hủy. Đích do robot tự nhận bằng thanh IR, không có cảm biến đích. Nút **không** thay công tắc nguồn.
+Nút nối GPIO40 với GND; input pull-up. Hành vi theo [ARCHITECTURE](../docs/ARCHITECTURE.md#2-vận-hành-bằng-một-nút): bấm là Start, bấm khi đang chạy là dừng, giữ nút lúc cắm pin là xoá map. Đích do robot tự nhận bằng thanh IR, không có cảm biến đích. Nút **không** thay công tắc nguồn.
 
 Đo pin bằng module voltage sensor đã mua ([icdayroi](https://icdayroi.com/cam-bien-voltage-sensor)), thay mạch 180k/22k trước đây:
 

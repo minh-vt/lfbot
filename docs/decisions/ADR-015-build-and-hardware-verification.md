@@ -2,9 +2,9 @@
 
 > Phần workflow MAIN được thay bởi [ADR-019](ADR-019-module-based-hardware.md). Quyết định build native và nguyên tắc kiểm chứng đúng phạm vi vẫn giữ.
 
-**Status:** Accepted theo yêu cầu chủ dự án, 2026-11-01. Thay phần hook `tools/native.py`/target sanitizer của [ADR-013](ADR-013-platformio-only.md) và vai trò ngspice bắt buộc của [ADR-014](ADR-014-main-a4950-prototype.md). Giữ PlatformIO-only, source membership, envelope prototype và các gate fit/release/bring-up.
+**Status:** Accepted theo yêu cầu chủ dự án, 2026-11-01. Thay phần hook `tools/native.py`/target sanitizer của [ADR-013](ADR-013-platformio-only.md). Giữ PlatformIO-only, source membership, envelope prototype và các gate fit/release/bring-up.
 
-**Cập nhật phạm vi MAIN:** [ADR-016](ADR-016-main-fixed-placement-routing.md) thay workflow R01–R12 và cách giữ candidate/report; không thay quyết định build hoặc nguyên tắc phân biệt CAD/calculation/bench của ADR này.
+**Cập nhật phạm vi MAIN:** phạm vi PCB riêng đã dừng; phần build và nguyên tắc phân biệt CAD/calculation/bench của ADR này vẫn giữ.
 
 ## Bối cảnh
 

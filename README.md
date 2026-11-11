@@ -1,6 +1,6 @@
 # LF-Bot
 
-Du an robot tu hanh bam line va vuot chuong ngai vat cho cuoc thi F-Maze-Solving tai Dai hoc FPT. Repository gom phan mem robot, moi truong mo phong va kiem thu tu dong.
+Du an robot tu hanh bam line va vuot chuong ngai vat cho cuoc thi F-Maze-Solving tai Dai hoc FPT. Repository gom firmware ESP32 (da viet lai, xem ADR-020) va kiem thu hop dong tren may host.
 
 ## Bat dau
 
@@ -10,7 +10,7 @@ Cai `just` va cac cong cu build theo [huong dan phat trien](AGENTS.md), sau do x
 just --list
 ```
 
-Cac lenh thuong dung: `just test` de kiem thu, `just sim` de mo mo phong. Danh sach tac vu duoc quan ly trong [justfile](justfile).
+Cac lenh thuong dung: `just test` de kiem thu, `just build` de dich firmware ESP32. Danh sach tac vu duoc quan ly trong [justfile](justfile).
 
 ## Tai lieu
 

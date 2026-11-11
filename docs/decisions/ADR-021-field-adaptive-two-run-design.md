@@ -1,6 +1,6 @@
 # ADR-021: Vận hành một nút, đích bằng 8 mắt trắng, tự hiệu chuẩn tại sân
 
-**Status:** Accepted, chủ dự án duyệt ngày 2026-11-10. Bổ sung [ADR-020](ADR-020-esp32-firmware-restart.md). Thay mô tả “nút Start/Stop” và mạch chia áp 180k/22k trong [ADR-019](ADR-019-module-based-hardware.md)/wiring. Chưa triển khai, chưa kiểm chứng trên board.
+**Status:** Accepted, chủ dự án duyệt ngày 2026-11-10. Bổ sung [ADR-020](ADR-020-esp32-firmware-restart.md). Thay mô tả “nút Start/Stop” và mạch chia áp 180k/22k trong [ADR-019](ADR-019-module-based-hardware.md)/wiring. Chưa triển khai, chưa kiểm chứng trên board. Phần phản hồi (âm thanh, LED GPIO39) và cử chỉ nút được thay bởi [ADR-022](ADR-022-control-strategy-and-codebase.md); cử chỉ nút, cách nhận đích và profile sân do người giữ nút đo được thay tiếp bởi [ADR-023](ADR-023-sensor-driven-two-run-firmware.md).
 
 ## Bối cảnh
 

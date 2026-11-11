@@ -4,7 +4,7 @@
 
 ## Context
 
-ADR-007 giu bang chung tung kenh va tach so do/trang thai/muc tieu; ADR-008 yeu cau chung follower cho hai luot va ne vat can. Chung chua chot construction, units, source ownership hay executable enforcement. Public concrete state va caller source globs lam controller substitution lan sang adapters. Sim hien tai con old contracts; core cu da duoc xoa mot phan.
+ Chung chua chot construction, units, source ownership hay executable enforcement. Public concrete state va caller source globs lam controller substitution lan sang adapters. Sim hien tai con old contracts; core cu da duoc xoa mot phan.
 
 ## Decision
 
@@ -20,4 +20,4 @@ ADR-007 giu bang chung tung kenh va tach so do/trang thai/muc tieu; ADR-008 yeu 
 
 Application source khong biet Race size/representation; recompile/relink van can. Borrowed lifetime, stack usage, watchdog va hardware calibration van can kiem chung, khong duoc suy ra tu access control. Gates ngan accidental misuse, khong sandbox nguoi sua toolchain/checker. CI configuration khong tu establish required branch protection.
 
-ADR nay thay the ADR-007/008 ve units, module ownership, construction va implementation direction; giu nguyen nguyen tac evidence, shared follower va hai luot cua chung. Lich su khong bi xoa. Research va approved breakdown duoc giu trong repo/scratch; architecture canonical khong duoc coi planning la runnable implementation.
+ADR nay chot units, module ownership, construction va implementation direction. Research va approved breakdown duoc giu trong repo/scratch; architecture canonical khong duoc coi planning la runnable implementation.

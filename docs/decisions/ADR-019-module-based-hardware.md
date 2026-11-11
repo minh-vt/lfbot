@@ -18,7 +18,7 @@ Lựa chọn thanh IR ưu tiên analog trực tiếp ADC1, một cụm liền v�
 
 ## Quyết định bị thay thế
 
-- [ADR-014](ADR-014-main-a4950-prototype.md), [ADR-016](ADR-016-main-fixed-placement-routing.md), [ADR-017](ADR-017-main-connectivity-placement.md), [ADR-018](ADR-018-main-spaced-placement.md): không còn áp dụng cho phần cứng đang lắp; giữ làm lịch sử thiết kế PCB.
+- ADR-014/016/017/018: các bước PCB riêng đã dừng và được xoá khỏi tài liệu; quyết định dừng ghi ở chính ADR này.
 - [ADR-015](ADR-015-build-and-hardware-verification.md): phần workflow MAIN không còn dùng. Quyết định build native và nguyên tắc phân biệt kiểm tra công cụ với kiểm chứng phần cứng vẫn giữ.
 - Không thay PlatformIO/ESP-IDF, contract core/sim, luật hai lượt hoặc kiến trúc Robot/Drive/Race. Không xóa các ADR phần mềm vì đổi driver.
 

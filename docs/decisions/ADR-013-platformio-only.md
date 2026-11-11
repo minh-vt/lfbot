@@ -1,6 +1,6 @@
 # ADR-013: PlatformIO CLI là frontend build duy nhất
 
-**Status:** Accepted theo yêu cầu chủ dự án. Phần hook `tools/native.py` và custom target sanitizer được thay bởi [ADR-015](ADR-015-build-and-hardware-verification.md); các mục tương ứng bên dưới là lịch sử. Thay phần frontend native CMake của [ADR-012](ADR-012-action-driven-simulation.md); giữ các quyết định engine/core/ownership và ESP32 deferred.
+**Status:** Accepted theo yêu cầu chủ dự án. Phần hook `tools/native.py` và custom target sanitizer được thay bởi [ADR-015](ADR-015-build-and-hardware-verification.md); các mục tương ứng bên dưới là lịch sử. Giữ quyết định core/ownership và ESP32 deferred.
 
 ## Bối cảnh
 
