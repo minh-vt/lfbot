@@ -1,6 +1,6 @@
 # ADR-023: Firmware dùng đủ cảm biến, sự thật lắp ráp là hằng số, nghiệm thu bằng xe chạy
 
-**Status:** Accepted, chủ dự án yêu cầu ngày 2026-11-11. Thay [ADR-022](ADR-022-control-strategy-and-codebase.md). Thay phần cử chỉ nút, đích 8 mắt trắng và "profile sân do người giữ nút đo" của [ADR-021](ADR-021-field-adaptive-two-run-design.md). Chưa triển khai.
+**Status:** Accepted, chủ dự án yêu cầu ngày 2026-11-11. Thay [ADR-022](ADR-022-control-strategy-and-codebase.md). Thay phần cử chỉ nút, đích 8 mắt trắng và "profile sân do người giữ nút đo" của [ADR-021](ADR-021-field-adaptive-two-run-design.md). Chưa triển khai. Phần điều khiển (vòng tốc độ bánh, profile độ cong) bị thay bởi [ADR-024](ADR-024-dimensionless-control.md).
 
 ## Bối cảnh
 

@@ -15,7 +15,8 @@ ADRs ghi boi canh, lua chon va danh doi; [ARCHITECTURE.md](../ARCHITECTURE.md) m
 | [020](ADR-020-esp32-firmware-restart.md) | Accepted | Viết lại firmware ESP32, bỏ simulator và core cũ, hiệu chuẩn tại sân |
 | [021](ADR-021-field-adaptive-two-run-design.md) | Accepted một phần; cử chỉ, đích, profile sân thay bởi 023 | Một nút Start/Hủy, đích 8 mắt trắng có xác nhận, tự hiệu chuẩn tại sân |
 | [022](ADR-022-control-strategy-and-codebase.md) | Superseded bởi 023 | Điều khiển ba tầng tự suy hệ số, tốc độ tự chọn, UX nút + LED GPIO48 |
-| [023](ADR-023-sensor-driven-two-run-firmware.md) | Accepted; chưa triển khai | Dùng đủ cảm biến, sự thật lắp ráp là hằng số, gain chỉnh trên đường thử, một nút, nghiệm thu bằng xe chạy |
+| [023](ADR-023-sensor-driven-two-run-firmware.md) | Accepted; phần điều khiển thay bởi 024; chưa triển khai | Dùng đủ cảm biến, sự thật lắp ráp là hằng số, gain chỉnh trên đường thử, một nút, nghiệm thu bằng xe chạy |
+| [024](ADR-024-dimensionless-control.md) | Accepted; chưa triển khai | Điều khiển không thứ nguyên; lượt 2 nhìn trước theo công sức lái đã ghi ở lượt 1 |
 
 Số thứ tự đã dùng được giữ nguyên; các số 001, 007, 008, 012, 014, 016, 017, 018 thuộc về thiết kế đã bị xoá (core cũ, simulator, các vòng PCB riêng) và đã bị gỡ khỏi tài liệu theo yêu cầu chủ dự án. Quyết định thay thế chúng nằm trong ADR-020/021/023 và ADR-019.
 
