@@ -123,7 +123,7 @@ for ref in order:
         slots[ref] = (240 + 40 * (_k % 4), 30 + 28 * (_k // 4))
         _k += 1
 for ref in order:
-    lib_id, fp, value, nets, _ = PARTS[ref]
+    lib_id, fp, value, nets = PARTS[ref]
     x, y = slots[ref]
     place(ref, lib_id, value, fp, round(x / 2.54) * 2.54, round(y / 2.54) * 2.54, nets)
 

@@ -1,11 +1,12 @@
 """Copy a .kicad_pcb without its routed copper: drops top-level segments, vias,
 arcs and copper pours, keeps footprints, text, outline and rule areas
-(keep-outs). With NET names, drops only the segments, vias and arcs of those
-nets and keeps every pour. Works on the file text because pcbnew segfaults
+(keep-outs). With NETs (exact names or patterns such as "/ADC_IR*"), drops
+only the segments, vias and arcs of those nets and keeps every pour. Works on the file text because pcbnew segfaults
 removing many tracks from Python (KiCad 10.0.8).
 
 usage: strip_copper.py IN.kicad_pcb OUT.kicad_pcb [NET ...]
 """
+import fnmatch
 import re
 import sys
 
@@ -37,7 +38,8 @@ def strip(text, nets=None):
                         head == "zone" and "(keepout" not in block)
                 else:
                     m = re.search(r'\(net "([^"]*)"\)', block)
-                    drop = head in ("segment", "via", "arc") and bool(m) and m.group(1) in nets
+                    drop = head in ("segment", "via", "arc") and bool(m) and any(
+                        fnmatch.fnmatchcase(m.group(1), pat) for pat in nets)
                 if drop:
                     k = start
                     while k > 0 and text[k - 1] in " \t\n":

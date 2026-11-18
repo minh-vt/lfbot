@@ -21,7 +21,7 @@ Ngày 2026-11-18. Phạm vi: [base.kicad_sch](base.kicad_sch) và [base.kicad_pc
 | 4 | Chọn vị trí jumper J4 (chân IR của thanh) | Không cắm jumper thì chân này để trống; chưa biết thanh xử lý trạng thái đó ra sao |
 | 5 | Ước dòng 3V3 (8 LED IR của thanh + ESP32 + ToF + IMU + 2 encoder) | Ổn áp trên devkit gánh toàn bộ; dòng LED IR của thanh chưa có số |
 
-Ngoài board: `firmware/src/esp32/pins.hpp` và [wiring.md](../wiring.md) chưa theo bảng GPIO mới. Firmware cũng vẫn coi mắt IR cách trục 45 mm, trong khi trên board là khoảng 90 mm.
+Ngoài board: [wiring.md](../wiring.md) đã theo bảng GPIO mới, nhưng `firmware/src/esp32/pins.hpp` thì chưa. Firmware cũng vẫn coi mắt IR cách trục 45 mm, trong khi trên board là khoảng 90 mm.
 
 ## Thay đổi so với v0.6 và lý do
 
@@ -153,7 +153,7 @@ DRC không bắt được 4 lỗi cuối vì đồng vẫn chạm nhau. Chúng �
 | Lỗ cách mép board | — | Gần nhất 1,35 mm (F1) |
 | Kích thước | — | 73,1 × 116,9 mm |
 
-Vùng GND mỗi mặt vẫn liền một mảng sau khi sửa. Nếu chạy lại `gen/route.sh`, các sửa tay ở bảng trên sẽ mất.
+Vùng GND mỗi mặt vẫn liền một mảng sau khi sửa. Nếu dùng `gen/route.sh` route lại các net trong bảng trên, sửa tay trên chúng sẽ mất.
 
 ## Hình học đường mạch
 

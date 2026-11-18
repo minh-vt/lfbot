@@ -5,8 +5,15 @@ import uuid
 OUT = sys.argv[1]
 
 
+# Fixed namespace and running count: the same source writes the same UUIDs,
+# so regenerating leaves unchanged footprints byte-identical.
+_NS = uuid.UUID("3b0f6a1e-2d4c-4f5a-9e8b-7c6d5e4f3a21")
+_N = [0]
+
+
 def U():
-    return f'(uuid "{uuid.uuid4()}")'
+    _N[0] += 1
+    return f'(uuid "{uuid.uuid5(_NS, str(_N[0]))}")'
 
 
 def fp(name, descr, body, attr="through_hole"):
