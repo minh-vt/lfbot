@@ -17,9 +17,11 @@ def symbol_uuid(ref):
 
 DEVKIT_NETS = {
     # front row (pins 1-22, toward the IR bar): all eight IR channels in the
-    # same left-to-right order as the bar, I2C/ToF/IR_CTRL in the middle gap
+    # same left-to-right order as the bar, I2C/ToF/IR_CTRL in the middle gap.
+    # SDA, SCL, XSHUT sit in the ToF header's order so the three run side by
+    # side through the IR header's pin gaps without crossing
     1: "+3V3", 2: "+3V3", 3: None, 4: "ADC_IR8", 5: "ADC_IR7", 6: "ADC_IR6",
-    7: "ADC_IR5", 8: "I2C_SDA", 9: "I2C_SCL", 10: "TOF_XSHUT", 11: "IR_CTRL",
+    7: "ADC_IR5", 8: "TOF_XSHUT", 9: "I2C_SCL", 10: "I2C_SDA", 11: "IR_CTRL",
     12: "ADC_IR4", 13: "ADC_IR3", 14: None, 15: "ADC_IR2", 16: "ADC_IR1",
     17: "BTN_START", 18: "BTN_2", 19: "IMU_INT", 20: None, 21: "+5V", 22: "GND",
     # rear row (pins 23-44, toward drivers and motors): motor PWM, encoders,

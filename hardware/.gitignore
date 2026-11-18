@@ -1,10 +1,5 @@
-# Archived/backup (recovery-only, not part of the deliverable)
-_archive/
-ir-array/_source-backup/
-
-# Regenerable exports and exploratory simulation output
+# Regenerable exports
 .generated/
-main/evidence/R02-spice/
 
 # KiCad per-user view state + editor locks
 *.kicad_prl

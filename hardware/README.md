@@ -8,6 +8,8 @@ Cấu hình hiện hành dùng module mua sẵn: ESP32-S3 N16R8, một thanh IR 
 - [BOM hiện hành](../docs/HARDWARE_BOM.csv).
 - [Quyết định chuyển sang module](../docs/decisions/ADR-019-module-based-hardware.md).
 
-## PCB cũ đã dừng
+- [PCB base: thiết kế, cách route, review](base/README.md). Bảng GPIO của base khác wiring.md; wiring.md là cách đấu dây rời cho khung in 3D cũ.
 
-[MAIN](main/README.md), [IR-03](ir-array/README.md) và `_archive/` được giữ để phục hồi, không phải hướng dẫn đấu module hiện hành. Không gửi Gerber IR cũ đi in hoặc dùng pinout MAIN cho bộ dây mới. Source CAD, thư viện và mechanical models vẫn giữ để phục hồi.
+## PCB cũ
+
+MAIN và IR-03 đã dừng ([ADR-019](../docs/decisions/ADR-019-module-based-hardware.md)) và đã xoá khỏi cây làm việc ngày 2026-11-18. Nếu cần, lấy lại từ lịch sử git (commit `3a825ba`). Bản vẽ gá motor, mẫu lỗ khay pin và datasheet motor mà base còn dùng đã chuyển vào [base/mechanical](base/mechanical/) và [base/datasheets](base/datasheets/).

@@ -36,7 +36,7 @@ def line(x1, y1, x2, y2, layer, w=0.1):
 
 def text(s, x, y, layer, size=0.8):
     return (f'\t(fp_text user "{s}" (at {x:.3f} {y:.3f} 0) (layer "{layer}") {U()} '
-            f'(effects (font (size {size} {size}) (thickness {size * 0.15:.3f}))))\n')
+            f'(effects (font (size {size} {size}) (thickness {max(0.15, size * 0.15):.3f}))))\n')
 
 
 def pad(num, x, y, size, drill, shape="circle"):
@@ -72,8 +72,8 @@ b += rect(-1.35, -9.0, 26.75, 57.0, "F.Fab", 0.1)
 b += line(-1.35, -1.5, 26.75, -1.5, "F.Fab")
 b += text("ANTEN", 12.7, -5, "F.Fab")
 b += text("USB-C x2", 12.7, 55, "F.Fab")
-b += text("5Vin", 2.0, 50.8, "F.SilkS", 0.8)
-b += rect(-1.27, -1.27, 1.27, 1.27, "F.SilkS", 0.12)
+b += text("5Vin", 2.9, 50.8, "F.SilkS", 0.8)
+b += rect(-1.27, -1.27, 1.27, 1.27, "F.SilkS", 0.15)
 files["ESP32-S3-DevKitC_TDM2533"] = fp(
     "ESP32-S3-DevKitC_TDM2533",
     "TDM2533 ESP32-S3 N16R8 dual USB-C devkit; DevKitC-1 pin order; rows 25.4 mm (owner "
@@ -143,11 +143,11 @@ for x in (-25, 25):
     for y in (-17.5, 17.5):
         b += npth(x, y, 3.2)
         b += circle(x, y, 3.3, "F.CrtYd")
-        b += circle(x, y, 3.0, "F.SilkS", 0.12)
+        b += circle(x, y, 3.0, "F.SilkS", 0.15)
 b += rect(-30, -22.5, 30, 22.5, "Dwgs.User", 0.1)
 b += text("tang pin in 3D (base.dxf 60x45)", 0, 0, "Dwgs.User", 0.8)
 files["Stack_Mount_50x35"] = fp(
-    "Stack_Mount_50x35", "Four M3 holes, 50 x 35 mm, same as hardware/main/base.dxf.",
+    "Stack_Mount_50x35", "Four M3 holes, 50 x 35 mm, same as hardware/base/mechanical/base.dxf.",
     b, attr="board_only exclude_from_pos_files exclude_from_bom")
 
 # --- IR bar mount: origin = eye line centre. Two M3 slots 37 mm apart, +-3 mm
@@ -156,6 +156,7 @@ b = ""
 for x in (-18.5, 18.5):
     b += slot(x, 7.3, 3.2, 3.0)
     b += rect(x - 3.0, 7.3 - 6.1, x + 3.0, 7.3 + 6.1, "F.Fab", 0.1)
+    b += rect(x - 1.85, 7.3 - 4.85, x + 1.85, 7.3 + 4.85, "F.CrtYd")  # the slot itself
 b += rect(-33, -3.6, 33, 13.4, "F.Fab", 0.1)
 b += line(-33, 0, 33, 0, "F.Fab", 0.15)
 b += text("mat IR (8 mat ~8 mm)", 0, -1.2, "F.Fab", 0.7)
@@ -200,7 +201,7 @@ b += text("banh 43", 22.85, 0, "F.Fab", 0.8)
 b += text("encoder", -16, 0, "F.Fab", 0.8)
 files["N20_Bracket_Mount"] = fp(
     "N20_Bracket_Mount",
-    "Printed N20 bracket from hardware/main/mechanical/Bracket.step: two screws 18 mm "
+    "Printed N20 bracket from hardware/base/mechanical/Bracket.step: two screws 18 mm "
     "apart, motor on top. Fab shows motor+encoder envelope and 43 mm wheel (track 95.2).",
     b, attr="board_only exclude_from_pos_files exclude_from_bom")
 

@@ -4820,7 +4820,7 @@
 		)
 		(uuid "32eaa2b2-5316-5f34-80df-4e8bb13eb0bd")
 	)
-	(label "I2C_SDA"
+	(label "TOF_XSHUT"
 		(at 53.34 76.20 180)
 		(effects
 			(font
@@ -4840,7 +4840,7 @@
 		)
 		(uuid "55ccfbbd-f04b-5c44-80e1-3386ab56cbf6")
 	)
-	(label "TOF_XSHUT"
+	(label "I2C_SDA"
 		(at 104.14 124.46 0)
 		(effects
 			(font

@@ -1,11 +1,11 @@
 # BASE: PCB làm khung xe
 
-PCB hai lớp 73 × 117 mm vừa là khung xe vừa là mạch nối các module. Board chia ba vùng. **Vùng công suất** ở cuối board: motor, nguồn vào, cầu đấu POWER và MOTOR của hai DRV8871, giắc encoder. **Vùng logic** ở giữa: ESP32 cắm trên header cái; dưới gầm nó có bi cầu, IMU, buck và chia áp đo pin. **Vùng analog** ở đầu board: thanh IR, chia áp IR, ToF. Dòng motor chỉ quay vòng trong vùng công suất. Pin 3×1S đặt trên tầng in 3D có sẵn, bắt vào bốn lỗ M3 cách nhau 50 × 35 mm (mẫu lỗ của [base.dxf](../main/base.dxf)). Lý do chọn hướng này ghi ở [ADR-025](../../docs/decisions/ADR-025-pcb-base-carrying-modules.md).
+PCB hai lớp 73 × 117 mm vừa là khung xe vừa là mạch nối các module. Board chia ba vùng. **Vùng công suất** ở cuối board: motor, nguồn vào, cầu đấu POWER và MOTOR của hai DRV8871, giắc encoder. **Vùng logic** ở giữa: ESP32 cắm trên header cái; dưới gầm nó có bi cầu, IMU, buck và chia áp đo pin. **Vùng analog** ở đầu board: thanh IR, chia áp IR, ToF. Dòng motor chỉ quay vòng trong vùng công suất. Pin 3×1S đặt trên tầng in 3D có sẵn, bắt vào bốn lỗ M3 cách nhau 50 × 35 mm (mẫu lỗ của [base.dxf](mechanical/base.dxf)). Lý do chọn hướng này ghi ở [ADR-025](../../docs/decisions/ADR-025-pcb-base-carrying-modules.md).
 
 **Trạng thái: bản 0.7, đã route, chưa đặt in.**
-- **DRC** (chấm theo luật của chính project, có đổ lại vùng đồng): 0 lỗi, 0 cảnh báo, 0 chân hở, khớp schematic.
+- **DRC** (luật siết theo năng lực JLCPCB, có đổ lại vùng đồng): 0 lỗi, 0 cảnh báo, 0 chân hở, khớp schematic. Gerber và file khoan đạt ngưỡng xưởng.
 - **Kích thước:** khoảng hở tối thiểu 0,2 mm; via 0,8/0,4 mm; không có via nằm trong pad SMD.
-- **Via:** 40 (27 via tín hiệu, 13 via khâu nối hai vùng GND).
+- **Via:** 36 (23 via tín hiệu và nguồn, 13 via khâu nối hai vùng GND).
 - **Chia lớp:** GND đổ đồng cả hai mặt; nguồn và motor đi ở mặt dưới, tín hiệu ở mặt trên.
 - **Review đầy đủ:** [REVIEW.md](REVIEW.md).
 - **Chưa làm:** chưa thử gá trên bản in 1:1, chưa có board thật.
@@ -22,6 +22,7 @@ Mở [base.kicad_pro](base.kicad_pro) bằng KiCad 10. Cần thư viện Espress
     - vùng cấm dưới thân ESP32 và hai DRV;
     - vùng khay pin chỉ cấm nút bấm;
     - thử 12 phương án, chọn phương án 2 vì route nhanh ra ít via nhất (20).
+  - **Vùng analog đặt tay** (sau khi đo thấy placer để dây đi vòng): 16 điện trở chia áp IR xếp thành 8 cột ngay sau header J3, mỗi cột thẳng sau chân IR của nó (10k ở hàng trước, 47k ở hàng sau). Dây ADC đi thẳng về ESP32, còn XSHUT, SCL, SDA đi thẳng qua khe giữa các chân J3 tới ToF. J4 dời sang trái các cột, J10 sang phải.
 - **`run_all.sh` từ chối chạy** nếu không có `FORCE=1`, vì `design.py` vẫn giữ vị trí cũ (v0.5); chạy với `FORCE=1` chỉ để sinh lại schematic và footprint.
 - **Route bằng [gen/route.sh](gen/route.sh)** (router của KiCadRoutingTools):
   - gỡ đồng cũ ([gen/strip_copper.py](gen/strip_copper.py));
@@ -33,7 +34,8 @@ Mở [base.kicad_pro](base.kicad_pro) bằng KiCad 10. Cần thư viện Espress
   - kết thúc bằng DRC của KiCad.
 - **Vì sao chọn cách chia lớp này:** so 4 cách trên cùng placement, số liệu trong REVIEW.md.
 - **Nhãn silkscreen:** sắp bằng `beautify_labels.py` của KRT sau khi route.
-- Từ bản này, file KiCad là bản gốc. Sửa trong KiCad rồi chạy lại `route.sh` và sắp nhãn khi cần.
+- **Làm gọn đường mạch:** [gen/tidy_tracks.py](gen/tidy_tracks.py) gộp khúc thẳng hàng, bỏ khúc gãy, nắn về 0/45/90° và vát góc 90°. Nó tự chạy DRC và lùi lại chỗ nào dính lỗi. Chạy được nhiều lần; cần file `.kicad_pro` nằm cạnh board.
+- Từ bản này, file KiCad là bản gốc; sửa trong KiCad. `route.sh` route lại từ đầu và làm mất các sửa tay sau khi route (silkscreen, đường nguồn, mối nối; liệt kê ở các mục Kiểm gia công và Hình học đường mạch của REVIEW.md). Nếu buộc phải chạy lại, sắp nhãn, chạy `tidy_tracks.py`, rồi làm lại các sửa đó.
 
 ## Gán chân GPIO (khác wiring.md cũ)
 
@@ -42,8 +44,8 @@ Chân được gán theo vị trí trên board để dây đi thẳng, không b�
 | Chức năng | GPIO |
 |---|---|
 | IR D1…D8 (trái → phải, như trên thanh) | 10, 9, 3, 8, 7, 6, 5, 4 |
-| I2C SDA / SCL | 15 / 16 |
-| ToF XSHUT, IR_CTRL (jumper J4) | 17, 18 |
+| I2C SDA / SCL | 17 / 16 |
+| ToF XSHUT, IR_CTRL (jumper J4) | 15, 18 |
 | Nút START, nút 2, IMU INT | 11, 12, 13 |
 | Motor trái IN1 / IN2, phải IN1 / IN2 | 38 / 39, 41 / 42 |
 | Encoder trái A / B, phải A / B | 21 / 47, 40 / 2 |
@@ -85,6 +87,7 @@ Trước khi đặt in, in [fitcheck/fitcheck_top_1to1.pdf](fitcheck/fitcheck_to
   - từ cầu đấu POWER vào pad V+ / V− (**đúng cực theo chữ trên board**).
   - Header 4 chân chỉ mang IN1, IN2 và GND; chân VM của header không nối.
 - **Header IR (J3)** nằm trên hàng chân của thanh IR, nối bằng dây ngắn từ mặt dưới. Chữ trên board ghi thứ tự GND, IR, D1…D8, VCC.
+- **Điện trở chia áp IR:** silkscreen không ghi tên từng con, chỉ ghi nhãn hàng "10k" và "47k" bên phải. Cột trái nhất là kênh D1 (R10, R20), cột phải nhất là D8 (R17, R27). Tên từng con có trên bản in fitcheck (lớp Fab).
 - **IMU (GY-9250):** hàn thẳng header của module xuống board để module nằm phẳng dưới gầm ESP32, gyro Z thẳng đứng.
 - **Rút ESP32 ra** khi cần vặn vít bi cầu hoặc chỉnh biến trở 5 V của buck.
 - **ToF:** cắm thẳng đứng vào J5 ở mép trước, mặt cảm biến hướng ra trước.

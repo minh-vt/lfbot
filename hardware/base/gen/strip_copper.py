@@ -1,14 +1,16 @@
 """Copy a .kicad_pcb without its routed copper: drops top-level segments, vias,
 arcs and copper pours, keeps footprints, text, outline and rule areas
-(keep-outs). Works on the file text because pcbnew segfaults removing many
-tracks from Python (KiCad 10.0.8).
+(keep-outs). With NET names, drops only the segments, vias and arcs of those
+nets and keeps every pour. Works on the file text because pcbnew segfaults
+removing many tracks from Python (KiCad 10.0.8).
 
-usage: strip_copper.py IN.kicad_pcb OUT.kicad_pcb
+usage: strip_copper.py IN.kicad_pcb OUT.kicad_pcb [NET ...]
 """
+import re
 import sys
 
 
-def strip(text):
+def strip(text, nets=None):
     out, pos, depth, in_str, start = [], 0, 0, False, None
     i, n = 0, len(text)
     removed = {}
@@ -30,8 +32,13 @@ def strip(text):
             if depth == 2:
                 block = text[start:i + 1]
                 head = block[1:].split(None, 1)[0]
-                if head in ("segment", "via", "arc") or (
-                        head == "zone" and "(keepout" not in block):
+                if nets is None:
+                    drop = head in ("segment", "via", "arc") or (
+                        head == "zone" and "(keepout" not in block)
+                else:
+                    m = re.search(r'\(net "([^"]*)"\)', block)
+                    drop = head in ("segment", "via", "arc") and bool(m) and m.group(1) in nets
+                if drop:
                     k = start
                     while k > 0 and text[k - 1] in " \t\n":
                         k -= 1
@@ -46,6 +53,6 @@ def strip(text):
 
 if __name__ == "__main__":
     src, dst = sys.argv[1], sys.argv[2]
-    stripped, removed = strip(open(src).read())
+    stripped, removed = strip(open(src).read(), set(sys.argv[3:]) or None)
     open(dst, "w").write(stripped)
     print("stripped", removed)
