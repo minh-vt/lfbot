@@ -14,3 +14,10 @@ CONFIG_ESP_TASK_WDT_INIT=n
 # The last run's log lives in its own partition (partitions.csv).
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# Writing the black box to flash switches the cache off for tens of milliseconds.
+# Interrupts that must keep running through it have to live in IRAM; without this
+# the ADC DMA ran dry during the write and the line sensors stayed dead until reboot.
+CONFIG_ADC_CONTINUOUS_ISR_IRAM_SAFE=y
+CONFIG_I2C_ISR_IRAM_SAFE=y
+CONFIG_PCNT_ISR_IRAM_SAFE=y
+CONFIG_RMT_ISR_IRAM_SAFE=y

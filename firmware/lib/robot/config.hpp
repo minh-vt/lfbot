@@ -26,34 +26,26 @@ inline constexpr std::array<bool, kWheelCount> kInvertEncoder = {false, true};
 inline constexpr float kGyroSign = 1.0F;
 
 // --- Measured on this robot ------------------------------------------------------
-// Fitted to the first bench routine on the floor, 2026-11-11, battery 11.4 V:
-// speed (encoder counts/s) against duty. The wheels-free figures measured earlier
-// (gain 11700, tau 0.15 s) were wrong for a robot on the ground: it is about
-// twice as strong per duty and about four times slower to respond.
-inline constexpr std::array<float, kWheelCount> kMotorGain = {22480.0F, 21009.0F};  // per duty
-inline constexpr std::array<float, kWheelCount> kMotorTau = {0.62F, 0.55F};         // s
-inline constexpr std::array<float, kWheelCount> kMotorDead = {0.21F, 0.22F};        // duty
+// The battery voltage the gains below were measured at; duty is corrected for sag.
 inline constexpr float kModelVoltage = 11.4F;
-// The speed loop is tuned for a closed-loop time constant of tau divided by this.
-inline constexpr float kSpeedLoopSpeedup = 2.0F;
-// The speed loop's PI only trims what the model gets wrong (turning in place needs
-// about 0.2 duty more than rolling), so it may move the duty by at most this much.
-inline constexpr float kTrimLimitDuty = 0.3F;
 // Count difference between the wheels per radian of body turn: from the gyro rate
 // against the wheel speed difference during the first turn.
 inline constexpr float kTrackCountsPerRad = 3040.0F;
-// Distance per encoder count. PLACEHOLDER until measured against the ToF.
-inline constexpr float kMmPerCount = 0.1F;
+// Distance per encoder count: slope of ToF distance against encoder counts over a
+// 300 mm go (0.0331) and back (0.0295), ToF noise about 10 mm. Cross-check: this
+// times kTrackCountsPerRad is 95 mm, the wheel spacing (110 mm outer span minus
+// the wheel width).
+inline constexpr float kMmPerCount = 0.0313F;
 
 // --- Safety limits ------------------------------------------------------------
 inline constexpr float kMaxDuty = 0.9F;
 // 3S LiPo: 3.3 V per cell.
 inline constexpr float kMinBatteryV = 9.9F;
-// A wheel told to move faster than kStallTargetCps and turning slower than
-// kStallRatio of the order for kStallUs is jammed.
-inline constexpr float kStallTargetCps = 500.0F;
-inline constexpr float kStallRatio = 0.2F;
-inline constexpr std::uint64_t kStallUs = 500000;
+// A wheel commanded forward at least this hard counts as trying to move; if neither
+// wheel turns faster than kStallCps for kStallTicks, the robot is jammed.
+inline constexpr float kStallForwardDuty = 0.35F;
+inline constexpr float kStallCps = 300.0F;
+inline constexpr std::uint64_t kStallTicks = 200;  // 0.4 s at 500 Hz
 // Older than this, the gyro is not trusted to steer.
 inline constexpr std::uint64_t kGyroStaleUs = 20000;
 // Gyro bias is measured over a block of kBiasBlockUs in which the gyro spread
@@ -70,38 +62,126 @@ inline constexpr std::uint64_t kButtonDebounceUs = 35000;
 
 // --- Motion estimation --------------------------------------------------------
 // Wheel speed is the count change over this many control ticks: one tick of
-// quantisation would be +-17% at 3000 counts/s.
+// quantisation would be +-17% at 3000 counts/s. It is used for odometry and stall
+// detection only; steering does not wait on it any more.
 inline constexpr std::size_t kSpeedWindowTicks = 10;
-// Below this the speed loop does not try to hold a target.
-inline constexpr float kMinTargetCps = 40.0F;
 
 // --- Manoeuvres (tuned on the bench) -------------------------------------------
-inline constexpr float kGoCps = 3000.0F;
-inline constexpr float kGoMinCps = 400.0F;
-inline constexpr float kGoAccelCpsPerS = 6000.0F;
-inline constexpr float kGoApproachPerS = 6.0F;  // speed = this x counts remaining
-inline constexpr float kGoToleranceMm = 3.0F;
-inline constexpr float kHeadingHoldPerS = 3.0F;
-inline constexpr float kHoldOmegaMaxRadS = 0.5F;
-inline constexpr float kTurnGainPerS = 4.0F;
-inline constexpr float kTurnOmegaMaxRadS = 2.5F;
-// Turning in place has to keep this speed until it arrives: below it the wheels
-// stop against friction short of the goal (stuck at 72 of 90 degrees on the floor).
-inline constexpr float kTurnOmegaMinRadS = 0.8F;
-inline constexpr float kTurnToleranceRad = 0.04F;
+// go and turn are PID on distance and angle, in duty directly. The D term damps
+// the speed/rate so the robot brakes as it arrives; the I term builds up against
+// the motor's dead band so it still reaches the goal instead of stalling short.
+inline constexpr float kGoPPerCount = 0.0008F;
+inline constexpr float kGoIPerCountS = 0.0003F;
+inline constexpr float kGoIntegralWindowCounts = 2000.0F;  // I acts only near the goal
+inline constexpr float kGoDDutyPerCps = 0.00015F;
+inline constexpr float kGoDutyMax = 0.7F;
+inline constexpr float kGoToleranceCounts = 96.0F;  // ~3 mm
+inline constexpr float kGoStopCps = 200.0F;
+inline constexpr float kHoldDutyPerRad = 1.0F;
+inline constexpr float kHoldIPerRadS = 1.0F;  // holds the heading through the dead band
+inline constexpr float kHoldTurnMaxDuty = 0.5F;
+inline constexpr float kTurnPPerRad = 1.5F;
+inline constexpr float kTurnIPerRadS = 1.5F;
+inline constexpr float kTurnIntegralWindowRad = 0.4F;  // I acts only near the goal
+inline constexpr float kTurnDDutyPerRate = 0.35F;
+inline constexpr float kTurnDutyMax = 0.8F;
+inline constexpr float kTurnToleranceRad = 0.03F;
+inline constexpr float kTurnSettledRateRadS = 0.3F;
 // After a move ends the wheels are braked for this long, then released.
 inline constexpr std::uint64_t kBrakeHoldUs = 200000;
 // Failure bound only. Progress is judged by encoder and gyro, never by time.
 inline constexpr std::uint64_t kManeuverTimeoutUs = 10000000;
 
-// --- Line sensors (kept until the step 2 rewrite) --------------------------------
-inline constexpr float kLineSplitFraction = 0.5F;
-inline constexpr float kLineMinContrast = 0.15F;
+// --- Reading the line --------------------------------------------------------
+// Dimensionless rules about each eye's own levels, so they do not depend on the
+// floor, the light or which way the sensor reads.
+inline constexpr std::size_t kMinUsableEyes = 5;
+// An eye can tell line from floor only if the two levels are further apart than
+// the floor itself wanders over the scan (the noise, tilt and light that eye sees),
+// by this factor (3 refused every outdoor eye in sun whose floor wandered by 200;
+// 2 accepts 5 of 8 on that same real scan), and by at least kMinSeparationCounts. This is judged
+// per eye from its own scan, so a dark floor that leaves little headroom below the ADC rail still
+// works while its contrast is real, and a saturated eye is left out.
+inline constexpr float kContrastOverSpread = 2.0F;
+inline constexpr float kMinSeparationCounts = 100.0F;
+// Histogram resolution and how much of the scan counts as "the rare tail".
+inline constexpr std::size_t kScanBinWidth = 16;
+inline constexpr float kScanTailFraction = 0.02F;
+// Polarity is voted per eye from tails this wide, and the floor's wander is read at
+// this quantile, so a few glare spikes in one eye do not decide either.
+inline constexpr float kPolarityTailFraction = 0.05F;
+inline constexpr float kSpreadTailFraction = 0.10F;
+// An eye is on the line past half way from floor to line; a quarter way and
+// beyond still shifts the centre.
+inline constexpr float kLineOnFraction = 0.5F;
+// Dark under this fraction of the usable eyes is not a line any more: a crossing or
+// a dark area. ASSUMES the line covers a smaller share of the bar than this; the
+// log's dark column shows how many eyes the line really covers (2 to 3 so far).
+inline constexpr float kWideFraction = 0.75F;
+// Light changes along the course: the floor level may drift by up to this much of
+// the eye's own contrast, at this rate, and only while the eye surely sees floor.
+inline constexpr float kFloorAdaptLimit = 0.5F;
+inline constexpr float kFloorAdaptPerS = 0.5F;
+inline constexpr float kFloorSureFraction = 0.1F;
+
+// --- Self-scan: swing over the line until every eye has seen both levels -----------
+inline constexpr std::array<float, 6> kScanSwingsRad = {0.5F, -0.5F, 0.9F, -0.9F, 1.3F, -1.3F};
+inline constexpr float kScanTurnDuty = 0.7F;
+
+// --- Following (tuned on a track) -----------------------------------------------------
+inline constexpr float kCruiseDuty = 0.7F;
+// Steering: turn duty per eye of line offset, plus a term on how fast the offset is
+// changing, so the robot starts turning before the line reaches the edge instead of
+// after. Negative offset is left, positive turn is left.
+inline constexpr float kSteerDutyPerEye = 0.20F;
+inline constexpr float kSteerDutyDamping = 0.02F;  // duty per eye/s of drift
+inline constexpr float kRateFilterPerS = 6.0F;     // low-pass on the offset rate
+// Speed adapts: full on a straight line, less as the offset grows or moves, so the
+// corner logic has time to react. kMinFollowFraction is the floor while still following.
+inline constexpr float kSlowByPosition = 0.12F;  // fraction of duty lost per eye of offset
+inline constexpr float kSlowByRate = 0.02F;      // fraction of duty lost per eye/s of drift
+inline constexpr float kMinFollowFraction = 0.45F;
+// Line lost with the last sighting within this many eyes of the outermost usable
+// eye: it left through the side of the bar, which is what a corner looks like.
+inline constexpr float kEdgeInsetEyes = 1.0F;
+// While most of the bar is dark (a junction or a thick mark) the robot crawls and
+// keeps its heading. If the line reappears straight on it was a crossing; if it
+// does not, the corner search begins there, not past the junction.
+inline constexpr float kNodeCrawlDuty = 0.30F;
+// Dark that lasts further than this is a failure, not a line to keep crossing.
+inline constexpr float kNodeStraightMm = 120.0F;
+// When the line is lost, roll forward this far before turning, so the wheels are at
+// the corner while the bar sits over the new line. This is the bar-to-axle distance
+// and is measured once on the real robot.
+inline constexpr float kCornerAdvanceMm = 45.0F;
+// A corner probe turns this far one way, then the other, looking for the exit line.
+inline constexpr float kProbeRad = 1.66F;  // ~95 degrees, a little past a right angle
+// Line gone from mid-bar with no junction: roll on this far; still no line is the finish.
+inline constexpr float kConfirmMm = 100.0F;
+// A reading older than this is not trusted to steer.
+inline constexpr std::uint64_t kIrStaleUs = 20000;
+
+// --- Obstacle (a brick on the line), bypassed on the right -------------------------------
+// Stop this far from the brick when the ToF sees it.
+inline constexpr float kBlockApproachMm = 150.0F;
+// The robot arrives at the brick at full line speed; it brakes to this wheel speed
+// before it turns, so momentum does not sweep it past the corner.
+inline constexpr float kBlockBrakeDuty = 0.4F;
+inline constexpr float kBlockStopCps = 300.0F;
+inline constexpr float kBlockTurnRad = 1.5707963F;  // 90 degrees
+inline constexpr float kBlockTurnDuty = 0.6F;
+// Worst-case brick across the line (205 mm), half of it plus half the robot plus margin.
+inline constexpr float kBlockSideClearMm = 210.0F;
+// The forward leg of the detour: the gap where the robot stopped short of the brick,
+// plus the brick's length along the line (205 mm), plus the robot's length and margin.
+inline constexpr float kBlockLengthClearMm = 600.0F;
+// Bounded search back towards the line after passing the brick.
+inline constexpr float kBlockSearchMm = 300.0F;
 
 // ToF older than this is logged as missing.
 inline constexpr std::uint64_t kTofStaleUs = 100000;
 
 // --- Log ------------------------------------------------------------------------
-inline constexpr std::uint32_t kLogEveryTicks = 5;  // 100 Hz
+inline constexpr std::uint32_t kLogEveryTicks = 10;  // 50 Hz: 4000 records hold 80 s, a whole lap
 
 }  // namespace lf

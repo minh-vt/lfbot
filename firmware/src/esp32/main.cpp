@@ -37,22 +37,6 @@ struct SlowSensors {
   std::uint8_t range_status = 255;
 };
 
-// The console posts a request; the control task takes it at the start of a tick.
-struct Mailbox {
-  lf::Command command;
-  std::atomic<bool> pending{false};
-  void post(const lf::Command& request) {
-    command = request;
-    pending.store(true, std::memory_order_release);
-  }
-  lf::Command take() {
-    if (!pending.exchange(false, std::memory_order_acquire)) {
-      return {};
-    }
-    return command;
-  }
-};
-
 lf::esp32::AdcInputs g_adc;
 lf::esp32::Encoders g_encoders;
 lf::esp32::Imu g_imu;
@@ -62,12 +46,13 @@ lf::esp32::Blackbox g_blackbox;
 lf::esp32::StatusLed g_led;
 lf::esp32::ButtonPin g_button;
 lf::Robot g_robot;
-Mailbox g_mailbox;
 SlowSensors g_slow;
 lf::Measurements g_latest;
 lf::Snapshot g_snapshot;
 lf::esp32::Diagnostics g_diagnostics;
 portMUX_TYPE g_lock = portMUX_INITIALIZER_UNLOCKED;
+// Set while the black box is being written; the LED says so, and power must stay on.
+std::atomic<bool> g_saving{false};
 std::atomic<std::uint32_t> g_heartbeat{0};
 std::atomic<std::uint32_t> g_tick_max_us{0};
 std::atomic<std::uint32_t> g_late_ticks{0};
@@ -121,9 +106,11 @@ void control_task(void*) {
     m.adc_overflows = g_adc.overflows();
 
     const bool button = g_button.down();
-    const lf::Outputs outputs = g_robot.step(m, button, start, g_mailbox.take());
+    const lf::Outputs outputs = g_robot.step(m, button, start, lf::Command{});
     g_motors.apply(outputs.motor);
-    g_led.set(outputs.led);
+    g_led.set(g_saving.load(std::memory_order_relaxed)
+                ? lf::LedPattern{lf::Colour::kMagenta, lf::Pattern::kSteady}
+                : outputs.led);
 
     const lf::Snapshot snapshot = g_robot.snapshot();
     portENTER_CRITICAL(&g_lock);
@@ -161,20 +148,20 @@ void service_task(void*) {
     diagnostics.watchdog_cuts = g_watchdog_cuts.load(std::memory_order_relaxed);
     diagnostics.motor_applies = g_motors.apply_count();
     diagnostics.adc_overflows = copy.adc_overflows;
+    diagnostics.adc_restarts = g_adc.restarts();
     // When a run ends, keep its log in flash. Flash writes stall the other core, so
     // this happens only after the robot has stopped, and nothing else that can
-    // start it (the console) runs in this task meanwhile.
-    const bool moving = snapshot.routine_active || snapshot.phase == lf::Phase::kSettling ||
-                        snapshot.phase == lf::Phase::kRunning;
+    // start it runs in this task meanwhile.
+    const bool moving = snapshot.phase == lf::Phase::kSettling ||
+                        snapshot.phase == lf::Phase::kRunning ||
+                        snapshot.phase == lf::Phase::kReady;
     if (was_moving && !moving) {
+      g_saving.store(true, std::memory_order_relaxed);
       static_cast<void>(g_blackbox.save(g_robot.log()));
+      g_saving.store(false, std::memory_order_relaxed);
     }
     was_moving = moving;
-    const lf::Command command =
-      lf::esp32::console_service(snapshot, copy, g_robot.log(), g_blackbox, diagnostics);
-    if (command.kind != lf::Command::Kind::kNone) {
-      g_mailbox.post(command);
-    }
+    lf::esp32::console_service(snapshot, copy, g_robot.log(), g_blackbox, diagnostics);
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }

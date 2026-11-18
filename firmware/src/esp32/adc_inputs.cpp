@@ -18,6 +18,10 @@ constexpr std::uint32_t kPeriodUs = 1000000U / (kSampleFreqHz / (kIrCount + 1));
 // Battery divider installed by the owner: a ~1:5 module. The real ratio is a
 // robot-profile value; this is only the starting point until it is measured.
 constexpr float kDefaultDivider = 5.0F;
+// No complete sweep for this long means the DMA has stopped (it ran dry while the
+// CPU was busy or the cache was off): start it again. Normal gap is 0.4 ms.
+constexpr std::uint64_t kStallRestartUs = 5000;
+constexpr std::uint64_t kRestartHoldoffUs = 20000;
 
 }  // namespace
 
@@ -59,10 +63,7 @@ bool AdcInputs::drain(std::uint64_t now_us) {
       break;
     if (status != ESP_OK) {
       ++overflows_;
-      next_ = 0;
-      ESP_ERROR_CHECK(adc_continuous_stop(handle_));
-      ESP_ERROR_CHECK(adc_continuous_flush_pool(handle_));
-      ESP_ERROR_CHECK(adc_continuous_start(handle_));
+      restart();
       break;
     }
     for (std::size_t offset = 0; offset + sizeof(adc_digi_output_data_t) <= length;
@@ -95,12 +96,27 @@ bool AdcInputs::drain(std::uint64_t now_us) {
   return saw_all;
 }
 
+void AdcInputs::restart() {
+  next_ = 0;
+  sum_.fill(0);
+  sweeps_ = 0;
+  ESP_ERROR_CHECK(adc_continuous_stop(handle_));
+  ESP_ERROR_CHECK(adc_continuous_flush_pool(handle_));
+  ESP_ERROR_CHECK(adc_continuous_start(handle_));
+}
+
 void AdcInputs::read(std::uint64_t now_us, Sample<std::array<std::uint16_t, kIrCount>>& ir,
                      Sample<float>& battery) {
   // Every complete sweep since the last tick is averaged, so the control loop
   // sees the mean of about five conversions per eye instead of one. If the ADC
   // stalls nothing is published and the consumer's freshness rule reports it.
   drain(now_us);
+  if (sweeps_ == 0 && last_publish_us_ != 0 && now_us - last_publish_us_ > kStallRestartUs &&
+      now_us - last_restart_us_ > kRestartHoldoffUs) {
+    ++restarts_;
+    last_restart_us_ = now_us;
+    restart();
+  }
   if (sweeps_ == 0) {
     ir.status = SampleStatus::kOverflow;
     battery.status = SampleStatus::kOverflow;

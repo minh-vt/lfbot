@@ -91,69 +91,38 @@ void test_a_shaken_robot_gives_no_bias_and_a_bump_is_waited_out() {
   require(accepted, "a short bump does not stop the robot starting once it is still");
 }
 
-void test_speed_loop_reaches_target_both_ways() {
-  for (const float target : {3000.0F, -3000.0F}) {
-    Plant plant;
-    lf::Motion motion;
-    lf::Drive drive;
-    std::uint64_t now_us = 0;
-    for (int tick = 0; tick < 1000; ++tick) {  // 2 s: the floor-loaded motor has tau of 0.6 s
-      now_us += Bench::kTickUs;
-      const lf::Measurements m = plant.measure(now_us);
-      motion.update(m);
-      lf::Outputs outputs;
-      outputs.motor = drive.step(motion, target, 0.0F, m.battery_v);
-      require(std::abs(outputs.motor.duty[0]) <= lf::kMaxDuty &&
-                std::abs(outputs.motor.duty[1]) <= lf::kMaxDuty,
-              "duty never exceeds the limit");
-      // The plant takes raw duty, so apply the wiring signs the way Robot does.
-      for (std::size_t wheel = 0; wheel < lf::kWheelCount; ++wheel) {
-        if (lf::kInvertWheel[wheel]) {
-          outputs.motor.duty[wheel] = -outputs.motor.duty[wheel];
-        }
-      }
-      plant.advance(outputs, lf::kControlDt);
-    }
-    require(std::abs(motion.wheel_cps(0) - target) < 0.05F * std::abs(target) &&
-              std::abs(motion.wheel_cps(1) - target) < 0.05F * std::abs(target),
-            "each wheel settles within 5% of target in two seconds, whatever its dead zone");
-  }
-}
-
-void test_no_target_means_no_duty() {
-  const lf::Motion motion;
-  lf::Drive drive;
-  lf::Sample<float> battery;
-  battery.status = lf::SampleStatus::kValid;
-  battery.value = 11.5F;
-  const lf::MotorOutput output = drive.step(motion, 0.0F, 0.0F, battery);
-  require(output.duty[0] == 0.0F && output.duty[1] == 0.0F, "zero target gives zero duty");
-}
-
-void test_unreachable_target_does_not_wind_up() {
+void test_direct_duty_applies_forward_and_turn() {
   Plant plant;
   lf::Motion motion;
   lf::Drive drive;
   std::uint64_t now_us = 0;
-  const auto run = [&](float target, int ticks) {
-    for (int tick = 0; tick < ticks; ++tick) {
-      now_us += Bench::kTickUs;
-      const lf::Measurements m = plant.measure(now_us);
-      motion.update(m);
-      lf::Outputs outputs;
-      outputs.motor = drive.step(motion, target, 0.0F, m.battery_v);
-      for (std::size_t wheel = 0; wheel < lf::kWheelCount; ++wheel) {
-        if (lf::kInvertWheel[wheel]) {
-          outputs.motor.duty[wheel] = -outputs.motor.duty[wheel];
-        }
-      }
-      plant.advance(outputs, lf::kControlDt);
-    }
-  };
-  run(15000.0F, 1000);  // 2 s asking for more than the motor can give
-  run(9000.0F, 1000);   // then a reachable target
-  require(std::abs(motion.wheel_cps(0) - 9000.0F) < 450.0F,
-          "settles on a reachable target within 2 s of saturating");
+  const lf::Measurements m = plant.measure(now_us);
+  motion.update(m);
+  const lf::Sample<float>& battery = m.battery_v;
+  const lf::MotorOutput straight = drive.step({0.5F, 0.0F}, battery, motion);
+  require(straight.duty[0] > 0.4F && straight.duty[1] > 0.4F, "forward drives both wheels");
+  const lf::MotorOutput left = drive.step({0.0F, 0.5F}, battery, motion);
+  require(left.duty[0] < left.duty[1], "a positive turn (left) drives the right wheel harder");
+  const lf::MotorOutput right = drive.step({0.0F, -0.5F}, battery, motion);
+  require(right.duty[0] > right.duty[1], "a negative turn (right) drives the left wheel harder");
+  const lf::MotorOutput clamped = drive.step({1.0F, 1.0F}, battery, motion);
+  require(std::abs(clamped.duty[0]) <= lf::kMaxDuty && std::abs(clamped.duty[1]) <= lf::kMaxDuty,
+          "duty never exceeds the limit");
+}
+
+void test_a_commanded_robot_that_does_not_move_is_stalled() {
+  Plant plant;
+  lf::Motion motion;
+  lf::Drive drive;
+  plant.jammed = true;
+  std::uint64_t now_us = 0;
+  for (int tick = 0; tick < 1000; ++tick) {
+    now_us += Bench::kTickUs;
+    const lf::Measurements m = plant.measure(now_us);
+    motion.update(m);
+    static_cast<void>(drive.step({0.6F, 0.0F}, m.battery_v, motion));
+  }
+  require(drive.stalled(), "a commanded robot with wheels that never turn is jammed");
 }
 
 }  // namespace
@@ -162,8 +131,7 @@ void run_motion() {
   test_wheels_report_forward_as_positive();
   test_gyro_integrates_a_turn_and_bias_is_removed();
   test_a_shaken_robot_gives_no_bias_and_a_bump_is_waited_out();
-  test_speed_loop_reaches_target_both_ways();
-  test_no_target_means_no_duty();
-  test_unreachable_target_does_not_wind_up();
+  test_direct_duty_applies_forward_and_turn();
+  test_a_commanded_robot_that_does_not_move_is_stalled();
   std::puts("motion: PASS (signs, odometry, gyro bias, speed loop)");
 }

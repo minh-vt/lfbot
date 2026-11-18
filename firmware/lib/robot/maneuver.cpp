@@ -19,56 +19,60 @@ void Maneuver::begin_go(float mm, const Motion& motion, std::uint64_t now_us) {
   goal_ = mm / kMmPerCount;
   s_start_ = motion.s_counts();
   psi_start_ = motion.psi_rad();
+  integral_ = 0.0F;
+  heading_integral_ = 0.0F;
 }
 
-void Maneuver::begin_turn(float rad, const Motion& motion, std::uint64_t now_us) {
+void Maneuver::begin_turn(float rad, const Motion& motion, std::uint64_t now_us, float turn_duty) {
   kind_ = Kind::kTurn;
   done_ = false;
   start_us_ = now_us;
   goal_ = rad;
   psi_start_ = motion.psi_rad();
+  turn_duty_ = turn_duty;
+  integral_ = 0.0F;
 }
 
 bool Maneuver::timed_out(std::uint64_t now_us) const {
   return now_us - start_us_ > kManeuverTimeoutUs;
 }
 
-Target Maneuver::step(const Motion& motion, std::uint64_t now_us) {
-  return kind_ == Kind::kGo ? step_go(motion, now_us) : step_turn(motion, now_us);
+Target Maneuver::step(const Motion& motion, std::uint64_t /*now_us*/) {
+  return kind_ == Kind::kGo ? step_go(motion) : step_turn(motion);
 }
 
-Target Maneuver::step_go(const Motion& motion, std::uint64_t now_us) {
-  const float direction = goal_ >= 0.0F ? 1.0F : -1.0F;
-  const float remaining = direction * (goal_ - (motion.s_counts() - s_start_));
-  // Arriving or passing the goal both end the move: braking lag means a robot
-  // that is merely near it would creep back and forth otherwise.
-  if (remaining <= kGoToleranceMm / kMmPerCount) {
+Target Maneuver::step_go(const Motion& motion) {
+  const float error = goal_ - (motion.s_counts() - s_start_);  // signed: positive still to go
+  const float rate = 0.5F * (motion.wheel_cps(0) + motion.wheel_cps(1));
+  if (std::abs(error) < kGoToleranceCounts && std::abs(rate) < kGoStopCps) {
     done_ = true;
     return {};
   }
-  const float seconds = static_cast<float>(now_us - start_us_) / kMicrosecondsPerSecond;
-  const float ramp = kGoMinCps + kGoAccelCpsPerS * seconds;
-  const float approach = kGoApproachPerS * remaining;
-  const float speed = std::clamp(std::min({kGoCps, ramp, approach}), kGoMinCps, kGoCps);
-  Target target;
-  target.v_cps = direction * speed;
-  target.omega_rad_s = std::clamp(kHeadingHoldPerS * (psi_start_ - motion.psi_rad()),
-                                  -kHoldOmegaMaxRadS, kHoldOmegaMaxRadS);
-  return target;
+  if (std::abs(error) < kGoIntegralWindowCounts) {
+    integral_ += kGoIPerCountS * error * kControlDt;
+    integral_ = std::clamp(integral_, -kGoDutyMax, kGoDutyMax);
+  }
+  const float forward =
+    std::clamp(kGoPPerCount * error + integral_ - kGoDDutyPerCps * rate, -kGoDutyMax, kGoDutyMax);
+  const float turn = std::clamp(kHoldDutyPerRad * (psi_start_ - motion.psi_rad()),
+                                -kHoldTurnMaxDuty, kHoldTurnMaxDuty);
+  return {forward, turn};
 }
 
-Target Maneuver::step_turn(const Motion& motion, std::uint64_t /*now_us*/) {
-  const float direction = goal_ >= 0.0F ? 1.0F : -1.0F;
-  const float remaining = direction * (goal_ - (motion.psi_rad() - psi_start_));
-  // Arriving or passing the goal both end the turn.
-  if (remaining <= kTurnToleranceRad) {
+Target Maneuver::step_turn(const Motion& motion) {
+  const float error = goal_ - (motion.psi_rad() - psi_start_);  // signed angle still to go
+  const float rate = motion.yaw_rate_rad_s();
+  if (std::abs(error) < kTurnToleranceRad && std::abs(rate) < kTurnSettledRateRadS) {
     done_ = true;
     return {};
   }
-  Target target;
-  target.omega_rad_s =
-    direction * std::clamp(kTurnGainPerS * remaining, kTurnOmegaMinRadS, kTurnOmegaMaxRadS);
-  return target;
+  if (std::abs(error) < kTurnIntegralWindowRad) {
+    integral_ += kTurnIPerRadS * error * kControlDt;
+    integral_ = std::clamp(integral_, -turn_duty_, turn_duty_);
+  }
+  const float turn = std::clamp(kTurnPPerRad * error + integral_ - kTurnDDutyPerRate * rate,
+                                -turn_duty_, turn_duty_);
+  return {0.0F, turn};
 }
 
 }  // namespace lf
