@@ -10693,7 +10693,7 @@
 			)
 		)
 	)
-	(gr_text "LF-Bot base v0.5 - 2026-11"
+	(gr_text "LF-Bot base v0.7 - 2026-11-19"
 		(at 0 -22 0)
 		(layer "B.SilkS")
 		(uuid "8f774d0b-690f-4ac0-bf95-037905235a69")

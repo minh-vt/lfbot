@@ -1,6 +1,6 @@
 # Review thiết kế BASE v0.7
 
-Ngày 2026-11-18. Phạm vi: [base.kicad_sch](base.kicad_sch) và [base.kicad_pcb](base.kicad_pcb) bản 0.7. Công cụ: các analyzer của kicad-happy, KiCad 10 DRC/ERC, ngspice, KiCadRoutingTools.
+Ngày 2026-11-18. Phạm vi: [base.kicad_sch](fab/base.kicad_sch) và [base.kicad_pcb](fab/base.kicad_pcb) bản 0.7. Công cụ: các analyzer của kicad-happy, KiCad 10 DRC/ERC, ngspice, KiCadRoutingTools.
 
 ## Kết luận
 
@@ -21,7 +21,7 @@ Ngày 2026-11-18. Phạm vi: [base.kicad_sch](base.kicad_sch) và [base.kicad_pc
 | 4 | Chọn vị trí jumper J4 (chân IR của thanh) | Không cắm jumper thì chân này để trống; chưa biết thanh xử lý trạng thái đó ra sao |
 | 5 | Ước dòng 3V3 (8 LED IR của thanh + ESP32 + ToF + IMU + 2 encoder) | Ổn áp trên devkit gánh toàn bộ; dòng LED IR của thanh chưa có số |
 
-Ngoài board: [wiring.md](../wiring.md) đã theo bảng GPIO mới, nhưng `firmware/src/esp32/pins.hpp` thì chưa. Firmware cũng vẫn coi mắt IR cách trục 45 mm, trong khi trên board là khoảng 90 mm.
+Ngoài board: [wiring.md](../wiring.md) và `firmware/src/esp32/pins.hpp` đã theo bảng GPIO mới. Firmware vẫn coi mắt IR cách trục 45 mm (`kCornerAdvanceMm`), trong khi trên board là khoảng 90 mm.
 
 ## Thay đổi so với v0.6 và lý do
 
@@ -115,7 +115,7 @@ Mọi đường nguồn và motor giữ đúng một độ rộng từ đầu t�
 
 ## Kiểm gia công
 
-Bản DRC "0 lỗi" trước đây chấm theo bộ luật lỏng: một số kiểm tra bị tắt hoặc chỉ là cảnh báo, và vài ngưỡng thấp hơn năng lực xưởng. Lần kiểm này siết luật trong [base.kicad_pro](base.kicad_pro) rồi sửa mọi thứ lộ ra.
+Bản DRC "0 lỗi" trước đây chấm theo bộ luật lỏng: một số kiểm tra bị tắt hoặc chỉ là cảnh báo, và vài ngưỡng thấp hơn năng lực xưởng. Lần kiểm này siết luật trong [base.kicad_pro](fab/base.kicad_pro) rồi sửa mọi thứ lộ ra.
 
 **Luật đã siết:**
 - **Ngưỡng:** vành đồng via ≥ 0,125 mm; chữ silkscreen cao ≥ 0,8 mm, nét ≥ 0,15 mm; lỗ cách lỗ ≥ 0,25 mm; khoảng hở và dây ≥ 0,2 mm; đồng cách mép board ≥ 0,5 mm.

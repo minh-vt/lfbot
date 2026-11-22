@@ -5,6 +5,7 @@ Cấu hình hiện hành dùng module mua sẵn: ESP32-S3 N16R8, một thanh IR 
 ## Bắt đầu
 
 - [PCB base: thiết kế, cách route, review](base/README.md).
+- PCB base làm tại nhà: [2 mặt, via xỏ dây](base/home/README.md) hoặc [1 mặt, cầu nối 0 Ω](base/single/README.md).
 - [Pin map, nguồn và cách đấu module lên board](wiring.md).
 - [BOM hiện hành](../docs/HARDWARE_BOM.csv).
 - [Quyết định chuyển sang module](../docs/decisions/ADR-019-module-based-hardware.md).

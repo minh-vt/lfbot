@@ -1,6 +1,6 @@
 # Đấu dây robot trên PCB base
 
-Trạng thái: pin map và cách đấu theo [PCB base](base/README.md) bản 0.7 (ngày 2026-11-18). Board **chưa đặt in, chưa lắp và chưa kiểm trên xe**. `firmware/src/esp32/pins.hpp` vẫn theo pin map cũ của khung dây rời; phải sửa theo bảng dưới trước khi nạp firmware lên board này. Quyết định: [ADR-019](../docs/decisions/ADR-019-module-based-hardware.md) (dùng module), [ADR-025](../docs/decisions/ADR-025-pcb-base-carrying-modules.md) (PCB làm khung). Danh mục: [BOM](../docs/HARDWARE_BOM.csv). Pin map của khung dây rời cũ có trong lịch sử git của file này.
+Trạng thái: pin map và cách đấu theo [PCB base](base/README.md) bản 0.7 (ngày 2026-11-18). Board **chưa đặt in, chưa lắp và chưa kiểm trên xe**. `firmware/src/esp32/pins.hpp` theo bảng dưới (2026-11-19); firmware đó mới chạy trên khung dây rời cũ, chưa chạy trên board. Quyết định: [ADR-019](../docs/decisions/ADR-019-module-based-hardware.md) (dùng module), [ADR-025](../docs/decisions/ADR-025-pcb-base-carrying-modules.md) (PCB làm khung). Danh mục: [BOM](../docs/HARDWARE_BOM.csv). Pin map của khung dây rời cũ có trong lịch sử git của file này.
 
 ## Cấu hình
 
@@ -43,6 +43,8 @@ Devkit 3V3 -> thanh IR, ToF, IMU, VCC hai encoder
 | 11 | BTN_START | SW1, J9 | Nút nối xuống GND, input pull-up |
 | 12 | BTN_2 | SW2, J9 | Như trên; chức năng do firmware định |
 | 13 | IMU_INT | IMU INT | |
+
+**Bản 1 mặt ([base/single](base/single/README.md)) đổi hai chân:** SDA ở GPIO15, TOF_XSHUT ở GPIO17 (SCL giữ GPIO16). Firmware chạy trên board đó cần bảng chân riêng. Bản xưởng và bản 2 mặt giữ bảng trên.
 | 38 / 39 | MOT_L_IN1 / IN2 | DRV8871 trái | PWM 20 kHz |
 | 41 / 42 | MOT_R_IN1 / IN2 | DRV8871 phải | PWM 20 kHz |
 | 21 / 47 | ENC_L_A / B | Encoder trái C1 / C2 | Input 3,3 V |
@@ -70,6 +72,8 @@ ADC_IR và VBAT_SENSE đều ở ADC1 nên đọc được khi Wi-Fi bật.
 - **Header J3** nằm trên hàng chân của thanh; nối bằng dây ngắn từ mặt dưới, **theo tên chân**: GND, IR, D1…D8, VCC (chữ in trên board). Không cắm header thẳng một-một.
 - **Thứ tự kênh:** nhìn theo hướng tiến (phía ToF), D1 ngoài cùng trái, D8 ngoài cùng phải (chủ dự án xác nhận 2026-11-11). Nếu gá đảo thì firmware đảo thứ tự, không suy trái/phải từ ảnh nhìn mặt dưới thanh.
 - **Chân IR của thanh** (điều khiển LED?) đi tới jumper J4 và chọn được 3V3, GPIO18 hoặc GND. Chưa biết thanh xử lý chân này ra sao khi để trống, nên cắm jumper trước khi chạy.
+  - **Tìm xem chân này làm gì** (một lần, trên board): cắm J4 vào GPIO18, xe đứng yên, mở console. Gõ `irctl high`, rồi `monitor` hai lần: một lần thanh trên giấy trắng, một lần nhấc thanh lên không. Lặp lại với `irctl low`. Mức làm số đọc đổi theo giấy trắng là mức **bật LED**; nếu cả hai mức cho số như nhau thì chân này không điều khiển LED. `irctl off` để thả chân.
+  - Ghi kết quả vào `pins::kIrCtrlWiring` (`kLedOnHigh` / `kLedOnLow`). Từ đó ADC đọc mỗi mắt lúc LED bật và lúc tắt, xen kẽ từng tick, và gửi hiệu hai số: ánh sáng phòng có ở cả hai lần nên bị trừ đi. Để `kNotUsed` thì firmware không đụng GPIO18; khi đó cắm J4 vào 3V3 hoặc GND.
 - **Chia áp:** mỗi kênh có 10k nối tiếp và 47k xuống GND, SMD 0805, xếp thành cột ngay sau J3: hàng 10k (R10…R17) ở trước, hàng 47k (R20…R27) ở sau, cột trái nhất là D1. Tỉ lệ 47/57: 3,0 V thành 2,47 V, trong vùng tuyến tính của ADC tới khoảng 2,9 V. Thay điện trở để đổi tỉ lệ. Chia áp không bảo vệ được khi đấu nhầm 5 V hay 3S.
 
 ```text
@@ -144,7 +148,7 @@ ToF và IMU không trùng địa chỉ. Pull-up bus có sẵn trên module; đ�
   - SW1 (START, GPIO11) và SW2 (nút 2, GPIO12) là nút 6 mm trên board.
   - J9 (BTN_START, BTN_2, GND) cho nút gắn ngoài, song song với hai nút trên board.
   - Hành vi của nút Start theo [ARCHITECTURE](../docs/ARCHITECTURE.md#2-vận-hành-bằng-một-nút). Đích do robot tự nhận bằng thanh IR, không có cảm biến đích.
-- **J10, I2C mở rộng:** +5V, +3V3, GND, SDA, SCL, cho cảm biến I2C sau này. Bus dùng chung với ToF và IMU.
+- **J10, I2C mở rộng:** +5V, +3V3, GND, SDA, SCL, cho cảm biến I2C sau này. Bus dùng chung với ToF và IMU. Trên bản 1 mặt, chân +5V của J10 để trống.
 - **Đo pin:**
   - R1 47k và R2 10k (đều 1%) cùng C2 100 nF vào GPIO1, tỉ lệ 57/10 = 5,7: 12,6 V cho 2,21 V tại ADC.
   - Nhờ điện trở 1%, tỉ lệ biết ngay từ BOM. Vẫn nên đo một lần bằng đồng hồ vạn năng và lưu vào profile robot.

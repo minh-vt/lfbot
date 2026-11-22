@@ -135,3 +135,22 @@ PARTS = {
 
 PWR_FLAGS = ["GND", "+3V3", "+5V"]
 
+# Pins a board variant changes, keyed by project name (the schematic file
+# name). The single-sided board swaps SDA and XSHUT on the ESP32 (U1.8 is
+# GPIO15, U1.10 GPIO17) so the three bus lines leave the header in the order
+# the ToF takes them and can run side by side to it without crossing; its
+# firmware needs SDA = GPIO15 and XSHUT = GPIO17. It also leaves +5V off the
+# expansion header J10, a branch that ran around most of the board.
+VARIANT_PINS = {
+    "single": {"U1": {8: "I2C_SDA", 10: "TOF_XSHUT"}, "J10": {1: None}},
+}
+
+
+def parts_for(project):
+    """PARTS with the variant's pin changes applied."""
+    parts = dict(PARTS)
+    for ref, pins in VARIANT_PINS.get(project, {}).items():
+        lib_id, fp, value, nets = parts[ref]
+        parts[ref] = (lib_id, fp, value, {**nets, **pins})
+    return parts
+

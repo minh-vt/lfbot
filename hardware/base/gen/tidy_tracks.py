@@ -1,14 +1,18 @@
 """Tidy routed copper in place, gated by KiCad DRC.
 
-First snaps track ends lying inside a via onto its centre and extends free
-ends that only graze a pad into it. Then splits each net's tracks into runs between anchors (pad, via, branch, width
-change, free end) and rewrites a run only when that makes it cleaner:
+Fixes loose ends first: a free track end lying inside a via moves onto its
+centre, and a free end that only grazes a pad is extended into it. Then each
+net's tracks are split into runs between anchors (pad, via, branch, width
+change, free end) and a run is rewritten only when that makes it cleaner:
 collinear pieces merged, jogs shorter than JOG folded away, off-angle
 segments made 0/45/90 degrees (slide the bend along the previous segment, or
 a dogleg), 90 degree corners chamfered at 45 degrees. A run that carries a
-T-junction is left as it is. After rewriting, KiCad DRC runs on the board
-with the project's own rules; every run near a violation goes back to its
-original copper and DRC runs again, until clean.
+T-junction is split at it first.
+
+Every change is checked with KiCad DRC under the project's own rules. DRC
+runs once on the untouched board as a baseline; any new violation undoes the
+end fix or steps the run back (lighter rewrite, then original copper) that
+caused it, until no new violation is left.
 
 usage: tidy_tracks.py BOARD.kicad_pcb   (needs BOARD.kicad_pro beside it)
 """
@@ -16,6 +20,7 @@ import collections
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -68,7 +73,7 @@ def snap_to_vias(board):
   vias = [v for v in board.GetTracks() if v.GetClass() == 'PCB_VIA']
   tracks = [t for t in board.GetTracks() if t.GetClass() == 'PCB_TRACK']
   ends = collections.Counter(key(e, t) for t in tracks for e in (t.GetStart(), t.GetEnd()))
-  n = 0
+  edits = []
   for t in tracks:
     for get, put in ((t.GetStart, t.SetStart), (t.GetEnd, t.SetEnd)):
       e = get()
@@ -78,12 +83,10 @@ def snap_to_vias(board):
         c = v.GetPosition()
         if v.GetNetCode() == t.GetNetCode() and e != c and \
             dist((e.x, e.y), (c.x, c.y)) < v.GetWidth(pcbnew.F_Cu) / 2:
+          edits.append((t, put, pcbnew.VECTOR2I(e)))
           put(c)
-          n += 1
           break
-  for t in [t for t in board.GetTracks() if t.GetClass() == 'PCB_TRACK' and t.GetLength() == 0]:
-    remove(board, t)
-  return n
+  return edits
 
 
 def seat_pad_ends(board):
@@ -94,7 +97,7 @@ def seat_pad_ends(board):
           if v.GetClass() == 'PCB_VIA'}
   ends = collections.Counter(key(e, t) for t in tracks for e in (t.GetStart(), t.GetEnd()))
   pads = [p for f in board.GetFootprints() for p in f.Pads()]
-  n = 0
+  edits = []
   for t in tracks:
     for get, put, other in ((t.GetStart, t.SetStart, t.GetEnd),
                             (t.GetEnd, t.SetEnd, t.GetStart)):
@@ -110,10 +113,10 @@ def seat_pad_ends(board):
         s = ((c.x - o.x) * d[0] + (c.y - o.y) * d[1]) / float(d[0] ** 2 + d[1] ** 2)
         q = pcbnew.VECTOR2I(round(o.x + s * d[0]), round(o.y + s * d[1]))
         if s > 1 and p.HitTest(q):
+          edits.append((t, put, pcbnew.VECTOR2I(e)))
           put(q)
-          n += 1
         break
-  return n
+  return edits
 
 
 def split_at_tees(board):
@@ -341,21 +344,83 @@ def write_run(board, run, pts):
   return new
 
 
+def signature(violation):
+  """Stable key for one DRC item. An open connection is reported with
+  whichever items KiCad picks as its ends, which change when unrelated copper
+  moves, so it is keyed by its nets."""
+  if violation['type'] == 'unconnected_items':
+    return (violation['type'], tuple(sorted({
+        m for i in violation['items'] for m in re.findall(r'\[([^\]]+)\]', i['description'])})))
+  return (violation['type'], tuple(sorted(i.get('uuid', '') for i in violation['items'])))
+
+
 def drc(path):
   out = tempfile.mktemp(suffix='.json')
   subprocess.run(['kicad-cli', 'pcb', 'drc', '--refill-zones', '--format', 'json',
                   '-o', out, path], check=True, capture_output=True)
   d = json.load(open(out))
   os.remove(out)
-  # library setup and silkscreen are not copper, which is all this edits
-  return [v for v in d['violations'] + d['unconnected_items']
-          if not v['type'].startswith(('lib_footprint', 'silk_', 'text_'))]
+  # library setup and silkscreen are not copper, which is all this edits;
+  # ends off a via centre are center_vias.py's job, run after this
+  return [dict(v, type='unconnected_items') if v in d['unconnected_items'] else v
+          for v in d['violations'] + d['unconnected_items']
+          if not v['type'].startswith(('lib_footprint', 'silk_', 'text_', 'track_not_centered'))]
+
+
+def touched(items, spots):
+  """Items whose copper lies on a violation spot; else anything within 2 mm."""
+  for tol in (pcbnew.FromMM(0.05), pcbnew.FromMM(2.0)):
+    found = [x for x in items if any(
+        t.HitTest(pcbnew.VECTOR2I(int(px), int(py)), tol)
+        for t in x[0] for px, py in spots)]
+    if found:
+      return found
+  return []
+
+
+def spots_of(bad):
+  return [(pcbnew.FromMM(i['pos']['x']), pcbnew.FromMM(i['pos']['y']))
+          for v in bad for i in v['items']]
+
+
+def give_up(board, path, changed, edits, why):
+  """Leave the board as it came in: undo every rewrite and end fix."""
+  for r in changed:
+    for s in r['new']:
+      remove(board, s)
+    for s in r['saved']:
+      board.Add(s)
+  for _, put, old in edits:
+    put(old)
+  pcbnew.SaveBoard(path, board)
+  print('runs kept: 0 (%s; every change undone)' % why)
 
 
 def main(path):
   board = pcbnew.LoadBoard(path)
-  print('track ends snapped to vias:', snap_to_vias(board))
-  print('track ends seated in pads:', seat_pad_ends(board))
+  # Violations already on the input are not this tool's business.
+  baseline = {signature(v) for v in drc(path)}
+
+  def new_violations():
+    pcbnew.SaveBoard(path, board)
+    return [v for v in drc(path) if signature(v) not in baseline]
+
+  # End fixes first, each undone if it causes a violation.
+  edits = snap_to_vias(board) + seat_pad_ends(board)
+  for _ in range(8):
+    bad = new_violations()
+    hit = touched([([t], put, old) for t, put, old in edits], spots_of(bad)) if bad else []
+    if not hit:
+      break
+    for (t,), put, old in hit:
+      put(old)
+      edits = [x for x in edits if not (x[0] is t and x[1] == put)]
+  for t in [t for t in board.GetTracks() if t.GetClass() == 'PCB_TRACK' and t.GetLength() == 0]:
+    remove(board, t)
+  print('track ends snapped or seated:', len(edits))
+  # The rewrites below are judged only on what they change themselves.
+  pcbnew.SaveBoard(path, board)
+  baseline = {signature(v) for v in drc(path)}
   print('T-junctions split:', split_at_tees(board))
   changed = []
   for run in build_runs(board):
@@ -371,21 +436,14 @@ def main(path):
     changed.append(run)
   print('runs rewritten:', len(changed))
   for rnd in range(8):
-    pcbnew.SaveBoard(path, board)
-    bad = drc(path)
+    bad = new_violations()
     if not bad:
       break
-    spots = [(pcbnew.FromMM(i['pos']['x']), pcbnew.FromMM(i['pos']['y']))
-             for v in bad for i in v['items']]
-    hit = [r for r in changed if any(
-        s.HitTest(pcbnew.VECTOR2I(int(x), int(y)), pcbnew.FromMM(0.05))
-        for s in r['new'] for x, y in spots)]
-    if not hit:   # e.g. a zone sliver: fall back to anything nearby
-      hit = [r for r in changed if any(
-          s.HitTest(pcbnew.VECTOR2I(int(x), int(y)), pcbnew.FromMM(2.0))
-          for s in r['new'] for x, y in spots)]
+    hit = [r for _, r in touched([(r['new'], r) for r in changed], spots_of(bad))]
     if not hit:
-      sys.exit('DRC violations not traceable to a rewritten run: %s' % bad)
+      give_up(board, path, changed, edits,
+              'new DRC violations not traceable to a rewrite: %s' % sorted({v['type'] for v in bad}))
+      return
     for r in hit:
       for s in r['new']:
         remove(board, s)
@@ -397,7 +455,8 @@ def main(path):
         changed.remove(r)
     print('round %d: %d violations, stepped back %d runs' % (rnd, len(bad), len(hit)))
   else:
-    sys.exit('still failing DRC after 8 rounds')
+    give_up(board, path, changed, edits, 'still failing DRC after 8 rounds')
+    return
   print('runs kept:', len(changed))
 
 

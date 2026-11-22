@@ -212,6 +212,38 @@ files["N20_Bracket_Mount"] = fp(
     "apart, motor on top. Fab shows motor+encoder envelope and 43 mm wheel (track 95.2).",
     b, attr="board_only exclude_from_pos_files exclude_from_bom")
 
+# 0 ohm 1206 used as a jumper on a single-sided board: both pads are pad
+# "1" and marked as jumpered, so KiCad sees one connection. The 1.8 mm gap
+# between the pads (KiCad's 1206 hand-solder land) lets one or two tracks run
+# under the part. Board only: it exists for the layout, not the circuit.
+b = "\t(duplicate_pad_numbers_are_jumpers yes)\n"
+for x in (-1.55, 1.55):
+    b += (f'\t(pad "1" smd roundrect (at {x:.3f} 0) (size 1.3 1.75) (layers "F.Cu" "F.Mask") '
+          f'(roundrect_rratio 0.192308) {U()})\n')
+b += rect(-1.6, -0.8, 1.6, 0.8, "F.Fab", 0.1)
+b += rect(-2.45, -1.13, 2.45, 1.13, "F.CrtYd")
+b += line(-0.5, -1.0, 0.5, -1.0, "F.SilkS", 0.15)
+b += line(-0.5, 1.0, 0.5, 1.0, "F.SilkS", 0.15)
+files["Jumper_0R_1206"] = fp(
+    "Jumper_0R_1206",
+    "0 ohm 1206 resistor as a jumper over tracks on a single-sided board; "
+    "1206 hand-solder land, 1.8 mm between pads.",
+    b, attr="smd board_only exclude_from_pos_files")
+
+# The same in 0805 (KiCad's hand-solder land, pads 2 mm apart, 0.8 mm gap:
+# room for one 0.3 mm track under the part).
+b = "\t(duplicate_pad_numbers_are_jumpers yes)\n"
+for x in (-1.0, 1.0):
+    b += (f'\t(pad "1" smd roundrect (at {x:.3f} 0) (size 1.2 1.4) (layers "F.Cu" "F.Mask") '
+          f'(roundrect_rratio 0.208333) {U()})\n')
+b += rect(-1.0, -0.625, 1.0, 0.625, "F.Fab", 0.1)
+b += rect(-1.85, -0.95, 1.85, 0.95, "F.CrtYd")
+files["Jumper_0R_0805"] = fp(
+    "Jumper_0R_0805",
+    "0 ohm 0805 resistor as a jumper over one track on a single-sided board; "
+    "0805 hand-solder land, 0.8 mm between pads.",
+    b, attr="smd board_only exclude_from_pos_files")
+
 for name, txt in files.items():
     open(f"{OUT}/{name}.kicad_mod", "w").write(txt)
 print("wrote", list(files))

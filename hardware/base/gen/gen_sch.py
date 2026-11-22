@@ -3,10 +3,13 @@ import os
 import sys
 import uuid
 
-from design import PARTS, PWR_FLAGS, UUID_NS, symbol_uuid
+from design import PWR_FLAGS, UUID_NS, parts_for, symbol_uuid
 from sexpr import Q, dump, find, first, parse
 
 OUT = sys.argv[1]
+# KiCad keys symbol instances by project name, i.e. the file name.
+PROJECT = os.path.splitext(os.path.basename(OUT))[0]
+PARTS = parts_for(PROJECT)
 LIBDIRS = {
     "PCM_Espressif": os.path.expanduser(
         "~/.local/share/kicad/10.0/3rdparty/symbols/"
@@ -90,7 +93,7 @@ def place(ref, lib_id, value, footprint, sx, sy, nets, in_bom=True):
             continue
         seen.add(num)
         s.append(["pin", Q(num), ["uuid", U()]])
-    s.append(["instances", ["project", Q("base"),
+    s.append(["instances", ["project", Q(PROJECT),
                             ["path", Q("/" + ROOT), ["reference", Q(ref)], ["unit", "1"]]]])
     items.append(s)
     pin_map[ref] = {}
