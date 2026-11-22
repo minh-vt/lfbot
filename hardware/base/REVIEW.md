@@ -1,4 +1,6 @@
-# Review thiết kế BASE v0.7
+# Review thiết kế BASE v0.7 (bản 2 lớp)
+
+Board xe là bản 1 mặt ([single](single/README.md)); mạch điện và vị trí linh kiện review ở đây là chung, phần route và chia lớp chỉ đúng cho bản 2 lớp.
 
 Ngày 2026-11-18. Phạm vi: [base.kicad_sch](fab/base.kicad_sch) và [base.kicad_pcb](fab/base.kicad_pcb) bản 0.7. Công cụ: các analyzer của kicad-happy, KiCad 10 DRC/ERC, ngspice, KiCadRoutingTools.
 
@@ -21,7 +23,7 @@ Ngày 2026-11-18. Phạm vi: [base.kicad_sch](fab/base.kicad_sch) và [base.kica
 | 4 | Chọn vị trí jumper J4 (chân IR của thanh) | Không cắm jumper thì chân này để trống; chưa biết thanh xử lý trạng thái đó ra sao |
 | 5 | Ước dòng 3V3 (8 LED IR của thanh + ESP32 + ToF + IMU + 2 encoder) | Ổn áp trên devkit gánh toàn bộ; dòng LED IR của thanh chưa có số |
 
-Ngoài board: [wiring.md](../wiring.md) và `firmware/src/esp32/pins.hpp` đã theo bảng GPIO mới. Firmware vẫn coi mắt IR cách trục 45 mm (`kCornerAdvanceMm`), trong khi trên board là khoảng 90 mm.
+Ngoài board: [wiring.md](../wiring.md) và `firmware/esp32/pins.hpp` theo bảng chân của bản 1 mặt (SDA và XSHUT đổi chỗ so với bản 2 lớp review ở đây). Firmware coi mắt IR cách trục 90 mm (`kBarAheadMm`).
 
 ## Thay đổi so với v0.6 và lý do
 
@@ -153,7 +155,7 @@ DRC không bắt được 4 lỗi cuối vì đồng vẫn chạm nhau. Chúng �
 | Lỗ cách mép board | — | Gần nhất 1,35 mm (F1) |
 | Kích thước | — | 73,1 × 116,9 mm |
 
-Vùng GND mỗi mặt vẫn liền một mảng sau khi sửa. Nếu dùng `gen/route.sh` route lại các net trong bảng trên, sửa tay trên chúng sẽ mất.
+Vùng GND mỗi mặt vẫn liền một mảng sau khi sửa.
 
 ## Hình học đường mạch
 

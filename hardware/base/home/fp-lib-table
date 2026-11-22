@@ -1,4 +1,0 @@
-(fp_lib_table
-	(version 7)
-	(lib (name "Base") (type "KiCad") (uri "${KIPRJMOD}/../Base.pretty") (options "") (descr "LF-Bot base footprints, shared by the fab and home boards"))
-)

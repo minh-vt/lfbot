@@ -2,7 +2,7 @@
 A. Hàn lên board,"R10–R17, R2",9,20,Điện trở dán 0805 10kΩ 1%,"0805, 10 kΩ, sai số 1%",8 cái chia áp IR + R2 đo pin. Mua túi lẻ hoặc dải 50 cái đều rẻ,Cần mua
 A. Hàn lên board,"R20–R27, R1",9,20,Điện trở dán 0805 47kΩ 1%,"0805, 47 kΩ, sai số 1%",8 cái chia áp IR + R1 đo pin,Cần mua
 A. Hàn lên board,C2,1,5,Tụ dán 0805 100nF,"0805, 100 nF, X7R, ≥16 V",Lọc đầu vào ADC đo pin,Cần mua
-A. Hàn lên board,D1,1,3,Diode Schottky SS14,"Vỏ SMA (DO-214AC), 1 A, 40 V",Cathode (vạch) quay về phía +5V theo chữ trên board,Cần mua
+A. Hàn lên board,D1,1,3,Diode Schottky SS14,"Vỏ SMA (DO-214AC), 1 A, 40 V",Hàn ở mặt dưới, dưới chỗ module buck, trước khi lắp buck; cathode (vạch) quay về phía ESP32 (+5V) theo sơ đồ lắp mặt dưới,Cần mua
 A. Hàn lên board,C1,1,2,Tụ hoá 220µF 25V,"220 µF, ≥25 V, đường kính 6,3 mm, chân cách 2,5 mm, cao ≤11 mm; ưu tiên low-ESR",Nằm dưới khay pin. Chân + vào pad có dấu +,Cần mua
 A. Hàn lên board,F1,1,2,Cầu chì tự phục hồi PTC chân cắm,"Điện áp ≥16 V (loại 30 V phổ biến), dòng giữ 1,6–1,85 A, chân cách khoảng 5 mm, chân ≤0,8 mm, thân dẹt rộng ≤10 mm",Mắc nối tiếp sau BAT+. Nằm dưới khay pin,Cần mua
 A. Hàn lên board,"SW1, SW2",2,4,Nút nhấn 6x6 mm 4 chân cắm,"6×6 mm, 4 chân xuyên lỗ; chiều cao tuỳ ý (loại 9,5 mm dễ bấm)","SW1 = START, SW2 = nút 2",Cần mua

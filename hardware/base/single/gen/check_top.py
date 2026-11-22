@@ -1,24 +1,28 @@
-"""Checks that matter only when the board is made without plated holes.
+"""Checks for a board made without plated holes (single.kicad_pcb).
 
-1. Top joints: plated-through pads that carry top copper. Each needs a
-   solder joint on the top side; a blocked pin (prepare.BLOCKED) must have none.
-2. Vias under parts: a via needs solder on both sides. Under a part that sits
-   flat on top (socket, JST, button, IMU, buck) the top joint is covered once
-   the part is fitted; under a part on the bottom (caster, IR bar) the joint
-   is in its way.
+1. Top joints: plated-through pads that a top track (a wire jumper) reaches.
+   Each would need a solder joint on the top side; a pin in BLOCKED must have
+   none.
+2. Jumper holes under parts: under a part that sits flat on top the wire has
+   no room; under a part on the bottom (caster, IR bar) the solder joint of
+   the hole is in its way and has to be filed flat.
 3. Drilling margin: copper ring left around each hole. A hand drill wanders,
    so a thin ring tears off easily.
 
-usage: home_check.py BOARD.kicad_pcb
+usage: check_top.py BOARD.kicad_pcb
 """
 import collections
-import os
 import sys
 
 import pcbnew
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from prepare import BLOCKED  # noqa: E402
+# ref -> pad numbers no top copper may reach (None: every plated pad). The DRV
+# wire pads (5-8) are left out: their wires are soldered on top anyway.
+BLOCKED = {
+    "U1": None, "U2": {"1", "2", "3", "4"}, "U3": {"1", "2", "3", "4"},
+    "U4": None, "J3": None, "J4": None, "J5": None, "J6": None, "J7": None,
+    "J8": None, "J9": None, "J10": None, "SW1": None, "SW2": None,
+}
 
 # Bottom parts whose body sits on the board: copper bumps under them matter.
 BOTTOM_BODIES = ("H2", "H3")
@@ -34,7 +38,6 @@ def main(path):
     mm = pcbnew.ToMM
     tracks = [t for t in board.GetTracks() if t.GetClass() == "PCB_TRACK"]
     vias = [v for v in board.GetTracks() if v.GetClass() == "PCB_VIA"]
-    pours = [z for z in board.Zones() if not z.GetIsRuleArea() and z.IsOnLayer(pcbnew.F_Cu)]
 
     top, bad = [], []
     for fp in board.GetFootprints():
@@ -42,14 +45,9 @@ def main(path):
             if pad.GetAttribute() != pcbnew.PAD_ATTRIB_PTH or not pad.GetNetname():
                 continue
             shape = pad.GetEffectivePolygon(pcbnew.F_Cu, pcbnew.ERROR_INSIDE)
-            outline = shape.Outline(0)
-            by_track = any(t.GetLayer() == pcbnew.F_Cu and t.GetNetCode() == pad.GetNetCode() and
-                           (shape.Collide(t.GetStart(), t.GetWidth() // 2) or
-                            shape.Collide(t.GetEnd(), t.GetWidth() // 2)) for t in tracks)
-            by_pour = any(z.GetNetCode() == pad.GetNetCode() and any(
-                z.GetFilledPolysList(pcbnew.F_Cu).Collide(outline.CPoint(i), pcbnew.FromMM(0.05))
-                for i in range(outline.PointCount())) for z in pours)
-            if by_track or by_pour:
+            if any(t.GetLayer() == pcbnew.F_Cu and t.GetNetCode() == pad.GetNetCode() and
+                   (shape.Collide(t.GetStart(), t.GetWidth() // 2) or
+                    shape.Collide(t.GetEnd(), t.GetWidth() // 2)) for t in tracks):
                 ref = fp.GetReference()
                 name = f"{ref}.{pad.GetNumber()} {pad.GetNetname().lstrip('/')}"
                 top.append(name)

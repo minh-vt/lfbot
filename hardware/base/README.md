@@ -2,30 +2,25 @@
 
 PCB hai lớp 73 × 117 mm vừa là khung xe vừa là mạch nối các module. Board chia ba vùng. **Vùng công suất** ở cuối board: motor, nguồn vào, cầu đấu POWER và MOTOR của hai DRV8871, giắc encoder. **Vùng logic** ở giữa: ESP32 cắm trên header cái; dưới gầm nó có bi cầu, IMU, buck và chia áp đo pin. **Vùng analog** ở đầu board: thanh IR, chia áp IR, ToF. Dòng motor chỉ quay vòng trong vùng công suất. Pin 3×1S đặt trên tầng in 3D có sẵn, bắt vào bốn lỗ M3 cách nhau 50 × 35 mm (mẫu lỗ của [base.dxf](mechanical/base.dxf)). Lý do chọn hướng này ghi ở [ADR-025](../../docs/decisions/ADR-025-pcb-base-carrying-modules.md).
 
-**Trạng thái: bản 0.7, file đặt in đã xuất ([release/v0.7](fab/release/v0.7/README.md)), chưa có board thật.**
-- **DRC** (luật siết theo năng lực JLCPCB, có đổ lại vùng đồng): 0 lỗi, 0 cảnh báo, 0 chân hở, khớp schematic. Gerber và file khoan đạt ngưỡng xưởng.
-- **Kích thước:** khoảng hở tối thiểu 0,2 mm; via 0,8/0,4 mm; không có via nằm trong pad SMD.
-- **Via:** 36 (23 via tín hiệu và nguồn, 13 via khâu nối hai vùng GND).
-- **Chia lớp:** GND đổ đồng cả hai mặt; nguồn và motor đi ở mặt dưới, tín hiệu ở mặt trên.
-- **Review đầy đủ:** [REVIEW.md](REVIEW.md).
-- **Đặt in và mua linh kiện:** gói Gerber, thông số đặt in và danh sách mua ở [release/v0.7](fab/release/v0.7/README.md).
-- **Làm tại nhà:** bản 2 mặt không mạ lỗ ở [home/](home/README.md), hoặc bản 1 mặt với cầu nối 0 Ω ở [single/](single/README.md) (không phải căn hai phim).
+**Board xe là bản 1 mặt làm tại nhà: [single/](single/README.md).** Bản 2 lớp trong [fab/](fab/) là nơi đặt vị trí linh kiện; bản 1 mặt sinh lại từ đó. Mô tả bên dưới (vùng, gán chân, lắp ráp) là chung; chỗ nào bản 1 mặt khác thì ghi trong README của nó.
+- **Trạng thái bản 1 mặt:** 0.7, DRC 0 lỗi, khớp schematic, chưa làm thử.
+- **Review bản 2 lớp** (chia lớp, hình học, kiểm gia công): [REVIEW.md](REVIEW.md).
+- **Danh sách mua linh kiện chung:** [fab/release/v0.7](fab/release/v0.7/README.md).
 - **Chưa làm:** chưa thử gá trên bản in 1:1, chưa có board thật.
 
 ## Cấu trúc thư mục
 
-Ba bản dùng chung linh kiện, vị trí và mạch điện; chỉ khác cách route theo cách gia công. KiCad ghép một project với đúng một schematic và một PCB, nên mỗi bản là một project riêng trong thư mục con của nó.
+Hai project dùng chung linh kiện và vị trí; bản 1 mặt đổi hai chân ESP32 và route lại cho một mặt đồng. KiCad ghép một project với đúng một schematic và một PCB, nên mỗi bản là một project riêng trong thư mục con của nó.
 
 | Thư mục | Nội dung |
 |---|---|
-| [fab/](fab/) | Bản gửi xưởng (mạ lỗ): `base.kicad_pro/pcb/sch`, [release](fab/release/v0.7/README.md) gồm Gerber, thông số đặt in, danh sách mua linh kiện |
-| [home/](home/README.md) | Bản làm tại nhà, 2 mặt (không mạ lỗ, via xỏ dây): `home.kicad_pro/pcb/sch`, script riêng trong `home/gen/`, release gồm phim, file khoan, hướng dẫn |
-| [single/](single/README.md) | Bản làm tại nhà, 1 mặt (đồng chỉ ở mặt dưới, cầu nối bằng điện trở 0 Ω và dây nhảy): `single.kicad_pro/pcb/sch`, script trong `single/gen/` |
+| [single/](single/README.md) | **Board xe.** 1 mặt làm tại nhà (đồng chỉ ở mặt dưới, cầu nối bằng điện trở 0 Ω và dây nhảy): `single.kicad_pro/pcb/sch`, script trong `single/gen/`, release gồm phim, file khoan, sơ đồ lắp |
+| [fab/](fab/) | Bản 2 lớp mạ lỗ: nguồn vị trí linh kiện cho bản 1 mặt; [release](fab/release/v0.7/README.md) có danh sách mua linh kiện (và Gerber nếu có lúc cần gửi xưởng) |
 | [gen/](gen/) | Script dùng chung: `design.py` (nguồn linh kiện và chân), sinh schematic/footprint, làm gọn đường mạch, in 1:1, báo cáo độ thẳng |
-| [Base.pretty/](Base.pretty/) | Footprint riêng, cả hai project cùng dùng |
-| [fitcheck/](fitcheck/), [mechanical/](mechanical/), [datasheets/](datasheets/) | Bản in 1:1 kiểm gá, bản vẽ cơ khí, datasheet: chung vì vị trí linh kiện chung |
+| [Base.pretty/](Base.pretty/) | Footprint riêng, hai project cùng dùng |
+| [mechanical/](mechanical/), [datasheets/](datasheets/) | Bản vẽ cơ khí, datasheet: chung vì vị trí linh kiện chung |
 
-Vị trí linh kiện chỉ sửa ở `fab/base.kicad_pcb`; hai bản tại nhà đọc vị trí từ đó khi sinh lại (`home/gen/make_home.sh`, `single/gen/make_single.sh`). Bản 1 mặt dời thêm J4, J10 (`single/gen/prepare.py`) và đổi hai chân ESP32 (`VARIANT_PINS` trong `gen/design.py`).
+Vị trí linh kiện chỉ sửa ở `fab/base.kicad_pcb`; bản 1 mặt đọc vị trí từ đó khi sinh lại (`single/gen/make_single.sh`), dời thêm J4, J10, D1 và chia áp đo pin (`single/gen/prepare.py`) và đổi hai chân ESP32 (`VARIANT_PINS` trong `gen/design.py`).
 
 ## Mở, đặt linh kiện và route
 
@@ -39,36 +34,25 @@ Mở [fab/base.kicad_pro](fab/base.kicad_pro) bằng KiCad 10. Cần thư viện
     - vùng cấm dưới thân ESP32 và hai DRV;
     - vùng khay pin chỉ cấm nút bấm;
     - thử 12 phương án, chọn phương án 2 vì route nhanh ra ít via nhất (20).
-  - **Vùng analog đặt tay** (sau khi đo thấy placer để dây đi vòng): 16 điện trở chia áp IR xếp thành 8 cột ngay sau header J3, mỗi cột thẳng sau chân IR của nó (10k ở hàng trước, 47k ở hàng sau). Dây ADC đi thẳng về ESP32, còn XSHUT, SCL, SDA đi thẳng qua khe giữa các chân J3 tới ToF. J4 dời sang trái các cột, J10 sang phải.
-- **Route:** bản 0.7 được route bằng router của **KiCadRoutingTools**:
-  - đổ GND ở F.Cu và B.Cu trước;
-  - route nguồn và motor ưu tiên B.Cu, tín hiệu ưu tiên F.Cu;
-  - khâu via nối hai vùng GND, cách nhau 16 mm;
-  - giữ via cách pad SMD 0,2 mm để hàn tay;
-  - không bao giờ xuống dưới luật của board, và không sửa file `.kicad_pro`.
-
-  Sau đó sửa tay và route lại vùng trước (REVIEW.md). Script route cả board đã bỏ vì nó xoá các sửa đó; nó còn trong lịch sử git.
-- **Route lại vài net:** [gen/route.sh](gen/route.sh) gỡ đồng của các net được nêu ([gen/strip_copper.py](gen/strip_copper.py)), route lại chúng theo từng lượt và theo thứ tự cho trước, giữ nguyên mọi đồng khác, rồi chạy `tidy_tracks.py` và DRC. Đầu file có ví dụ đúng cách vùng trước của bản 0.7 đã được route.
-- **Vì sao chọn cách chia lớp này:** so 4 cách trên cùng placement, số liệu trong REVIEW.md.
-- **Nhãn silkscreen:** sắp bằng `beautify_labels.py` của KRT sau khi route.
+  - **Vùng analog đặt tay** (sau khi đo thấy placer để dây đi vòng): 16 điện trở chia áp IR xếp thành 8 cột ngay sau header J3, mỗi cột thẳng sau chân IR của nó (10k ở hàng trước, 47k ở hàng sau). Dây ADC đi thẳng về ESP32. Bản 1 mặt dời thêm J4, J10 và cho bus I2C đi vòng mép phải ([single/README.md](single/README.md#thiết-kế-lại-cho-1-mặt)).
+- **Route:** board xe (bản 1 mặt) được sinh lại từ vị trí này bằng `single/gen/make_single.sh`: bus vẽ tay, phần còn lại do router của KiCadRoutingTools, rồi đổi dây nhảy thành điện trở 0 Ω ([single/README.md](single/README.md#sinh-lại)). Đường mạch trong `fab/base.kicad_pcb` là của bản 2 lớp, không còn được bảo trì; bảng chân của nó (SDA 17, XSHUT 15) không khớp firmware.
 - **Làm gọn đường mạch:** [gen/tidy_tracks.py](gen/tidy_tracks.py) gộp khúc thẳng hàng, bỏ khúc gãy, nắn về 0/45/90° và vát góc 90°. Nó tự chạy DRC và lùi lại chỗ nào dính lỗi. Chạy được nhiều lần; cần file `.kicad_pro` nằm cạnh board.
-- **File KiCad là bản gốc** của layout; sửa trong KiCad. `route.sh` chỉ thay đồng của các net được nêu, nên sửa tay trên các net đó (liệt kê ở các mục Kiểm gia công và Hình học đường mạch của REVIEW.md) sẽ mất.
 
 ## Gán chân GPIO
 
-Chân được gán theo vị trí trên board để dây đi thẳng, không bắt chéo. Hàng chân phía trước của ESP32 (quay về thanh IR) mang IR, I2C và nút bấm. Hàng phía sau (quay về DRV và motor) mang PWM, encoder và đo pin.
+Chân được gán theo vị trí trên board để dây đi thẳng, không bắt chéo. Hàng chân phía trước của ESP32 (quay về thanh IR) mang IR, I2C và nút bấm. Hàng phía sau (quay về DRV và motor) mang PWM, encoder và đo pin. Bảng dưới là của bản 1 mặt; bản 2 lớp đổi chỗ SDA và XSHUT (17 / 15).
 
 | Chức năng | GPIO |
 |---|---|
 | IR D1…D8 (trái → phải, như trên thanh) | 10, 9, 3, 8, 7, 6, 5, 4 |
-| I2C SDA / SCL | 17 / 16 |
-| ToF XSHUT, IR_CTRL (jumper J4) | 15, 18 |
+| I2C SDA / SCL | 15 / 16 |
+| ToF XSHUT, IR_CTRL (jumper J4) | 17, 18 |
 | Nút START, nút 2, IMU INT | 11, 12, 13 |
 | Motor trái IN1 / IN2, phải IN1 / IN2 | 38 / 39, 41 / 42 |
 | Encoder trái A / B, phải A / B | 21 / 47, 40 / 2 |
 | Đo pin (47k/10k, tỉ lệ 5,7) | 1 |
 
-GPIO3 là chân strapping, nhưng chỉ dùng làm đầu vào analog. Cách đấu từng module và chân để trống có trong [wiring.md](../wiring.md). `firmware/src/esp32/pins.hpp` đã theo bảng này.
+GPIO3 là chân strapping, nhưng chỉ dùng làm đầu vào analog. Cách đấu từng module và chân để trống có trong [wiring.md](../wiring.md). `firmware/esp32/pins.hpp` theo bảng này.
 
 ## Những gì thiết kế tự hấp thụ
 
@@ -93,7 +77,7 @@ Các mục sau chỉ quyết định khoảng hở, không ảnh hưởng mạch
 - **Bi cầu:** coi là Ø23 mm; nó nằm vừa giữa hai hàng chân ESP32 (tâm mỗi hàng cách tâm bi 12,7 mm).
 - **Motor + encoder:** coi dài 33 mm. Cả dải ±7,5 mm quanh trục để trống, nên encoder dài hơn cũng chỉ lấn vào phần board trống.
 
-Trước khi đặt in, in [fitcheck/fitcheck_top_1to1.pdf](fitcheck/fitcheck_top_1to1.pdf) và [fitcheck_bottom_1to1.pdf](fitcheck/fitcheck_bottom_1to1.pdf) đúng 100% (không "fit to page") và đo vạch 100 mm in kèm, rồi đặt devkit, DRV, gá motor, thanh IR, bi cầu và buck lên giấy để kiểm. Có [STEP](fitcheck/base_v0.7.step) để ghép trong CAD. Hai file này sinh bằng [gen/plot_1to1.py](gen/plot_1to1.py): kicad-cli in tỉ lệ 1:1 tính từ góc trang, nên trước đây board rơi gần hết ra ngoài trang.
+Trước khi làm mạch, in hai sơ đồ lắp của [bản 1 mặt](single/release/v0.7/) đúng 100% (không "fit to page"), đo vạch 100 mm in kèm, rồi đặt devkit, DRV, gá motor, thanh IR, bi cầu và buck lên giấy để kiểm. Cùng thư mục có file STEP để ghép trong CAD. Các trang 1:1 sinh bằng [gen/plot_1to1.py](gen/plot_1to1.py), vì kicad-cli in tỉ lệ 1:1 tính từ góc trang nên board rơi ra ngoài trang.
 
 ## Lắp ráp
 
@@ -104,7 +88,7 @@ Trước khi đặt in, in [fitcheck/fitcheck_top_1to1.pdf](fitcheck/fitcheck_to
   - từ cầu đấu POWER vào pad V+ / V− (**đúng cực theo chữ trên board**).
   - Header 4 chân chỉ mang IN1, IN2 và GND; chân VM của header không nối.
 - **Header IR (J3)** nằm trên hàng chân của thanh IR, nối bằng dây ngắn từ mặt dưới. Chữ trên board ghi thứ tự GND, IR, D1…D8, VCC.
-- **Điện trở chia áp IR:** silkscreen không ghi tên từng con, chỉ ghi nhãn hàng "10k" và "47k" bên phải. Cột trái nhất là kênh D1 (R10, R20), cột phải nhất là D8 (R17, R27). Tên từng con có trên bản in fitcheck (lớp Fab).
+- **Điện trở chia áp IR:** silkscreen không ghi tên từng con, chỉ ghi nhãn hàng "10k" và "47k" bên phải. Cột trái nhất là kênh D1 (R10, R20), cột phải nhất là D8 (R17, R27). Tên từng con có trên sơ đồ lắp mặt dưới của bản 1 mặt.
 - **IMU (GY-9250):** hàn thẳng header của module xuống board để module nằm phẳng dưới gầm ESP32, gyro Z thẳng đứng.
 - **Rút ESP32 ra** khi cần vặn vít bi cầu hoặc chỉnh biến trở 5 V của buck.
 - **ToF:** cắm thẳng đứng vào J5 ở mép trước, mặt cảm biến hướng ra trước.

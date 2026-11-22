@@ -1,6 +1,6 @@
 # Đấu dây robot trên PCB base
 
-Trạng thái: pin map và cách đấu theo [PCB base](base/README.md) bản 0.7 (ngày 2026-11-18). Board **chưa đặt in, chưa lắp và chưa kiểm trên xe**. `firmware/src/esp32/pins.hpp` theo bảng dưới (2026-11-19); firmware đó mới chạy trên khung dây rời cũ, chưa chạy trên board. Quyết định: [ADR-019](../docs/decisions/ADR-019-module-based-hardware.md) (dùng module), [ADR-025](../docs/decisions/ADR-025-pcb-base-carrying-modules.md) (PCB làm khung). Danh mục: [BOM](../docs/HARDWARE_BOM.csv). Pin map của khung dây rời cũ có trong lịch sử git của file này.
+Trạng thái: pin map và cách đấu theo [PCB base 1 mặt](base/single/README.md) bản 0.7, board xe dùng để thi. Board **chưa làm, chưa lắp và chưa kiểm trên xe**. `firmware/esp32/pins.hpp` theo bảng dưới. Quyết định: [ADR-019](../docs/decisions/ADR-019-module-based-hardware.md) (dùng module), [ADR-025](../docs/decisions/ADR-025-pcb-base-carrying-modules.md) (PCB làm khung). Danh mục: [BOM](../docs/HARDWARE_BOM.csv).
 
 ## Cấu hình
 
@@ -36,15 +36,15 @@ Devkit 3V3 -> thanh IR, ToF, IMU, VCC hai encoder
 |---|---|---|---|
 | 10, 9, 3, 8 | ADC_IR1…4 | IR D1…D4 qua chia áp | ADC1 |
 | 7, 6, 5, 4 | ADC_IR5…8 | IR D5…D8 qua chia áp | ADC1 |
-| 17 | I2C_SDA | ToF, IMU, J10 | |
+| 15 | I2C_SDA | ToF, IMU, J10 | |
 | 16 | I2C_SCL | ToF, IMU, J10 | |
-| 15 | TOF_XSHUT | ToF SHUT | Open-drain: kéo thấp để reset, nhả để chạy |
+| 17 | TOF_XSHUT | ToF SHUT | Open-drain: kéo thấp để reset, nhả để chạy |
 | 18 | IR_CTRL | Jumper J4 | Chỉ dùng khi cắm jumper chọn GPIO cho chân IR của thanh |
 | 11 | BTN_START | SW1, J9 | Nút nối xuống GND, input pull-up |
 | 12 | BTN_2 | SW2, J9 | Như trên; chức năng do firmware định |
 | 13 | IMU_INT | IMU INT | |
 
-**Bản 1 mặt ([base/single](base/single/README.md)) đổi hai chân:** SDA ở GPIO15, TOF_XSHUT ở GPIO17 (SCL giữ GPIO16). Firmware chạy trên board đó cần bảng chân riêng. Bản xưởng và bản 2 mặt giữ bảng trên.
+Bản 2 lớp `base/fab` (chỉ còn là nguồn vị trí linh kiện) đổi chỗ SDA và XSHUT (17 / 15); firmware không có bảng chân cho nó.
 | 38 / 39 | MOT_L_IN1 / IN2 | DRV8871 trái | PWM 20 kHz |
 | 41 / 42 | MOT_R_IN1 / IN2 | DRV8871 phải | PWM 20 kHz |
 | 21 / 47 | ENC_L_A / B | Encoder trái C1 / C2 | Input 3,3 V |
@@ -110,10 +110,10 @@ Cắm thẳng đứng vào J5 ở mép trước, mặt cảm biến hướng ra 
 |---|---|
 | VIN | 3V3 |
 | GND | GND |
-| SDA | GPIO17 |
+| SDA | GPIO15 |
 | SCL | GPIO16 |
 | INT | Không nối |
-| SHUT / XSHUT | GPIO15, open-drain; dùng pull-up có sẵn trên module |
+| SHUT / XSHUT | GPIO17, open-drain; dùng pull-up có sẵn trên module |
 
 - **Địa chỉ I2C** 7-bit mặc định là `0x29`.
 - **XSHUT:** không đẩy lên 5 V, không thêm pull-up 5 V.
@@ -128,7 +128,7 @@ Hàn thẳng header của module xuống J6 để module nằm phẳng dưới g
 | VCC | 3V3 |
 | GND | GND |
 | SCL / SCLK | GPIO16 |
-| SDA / SDI | GPIO17 |
+| SDA / SDI | GPIO15 |
 | EDA, ECL | Không nối |
 | AD0 / SDO | GND, địa chỉ `0x68` |
 | INT | GPIO13 |
@@ -148,7 +148,7 @@ ToF và IMU không trùng địa chỉ. Pull-up bus có sẵn trên module; đ�
   - SW1 (START, GPIO11) và SW2 (nút 2, GPIO12) là nút 6 mm trên board.
   - J9 (BTN_START, BTN_2, GND) cho nút gắn ngoài, song song với hai nút trên board.
   - Hành vi của nút Start theo [ARCHITECTURE](../docs/ARCHITECTURE.md#2-vận-hành-bằng-một-nút). Đích do robot tự nhận bằng thanh IR, không có cảm biến đích.
-- **J10, I2C mở rộng:** +5V, +3V3, GND, SDA, SCL, cho cảm biến I2C sau này. Bus dùng chung với ToF và IMU. Trên bản 1 mặt, chân +5V của J10 để trống.
+- **J10, I2C mở rộng:** chân 1 để trống, rồi +3V3, GND, SDA, SCL, cho cảm biến I2C 3,3 V sau này. Bus dùng chung với ToF và IMU.
 - **Đo pin:**
   - R1 47k và R2 10k (đều 1%) cùng C2 100 nF vào GPIO1, tỉ lệ 57/10 = 5,7: 12,6 V cho 2,21 V tại ADC.
   - Nhờ điện trở 1%, tỉ lệ biết ngay từ BOM. Vẫn nên đo một lần bằng đồng hồ vạn năng và lưu vào profile robot.
