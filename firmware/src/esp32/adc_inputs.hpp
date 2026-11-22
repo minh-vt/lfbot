@@ -21,12 +21,14 @@ public:
 private:
   static constexpr std::size_t kChannels = kIrCount + 1;
   bool drain(std::uint64_t now_us);
+  void restart();
 
 public:
   [[nodiscard]] std::uint32_t last_channel() const { return last_channel_; }
   [[nodiscard]] std::uint32_t last_data() const { return last_data_; }
   [[nodiscard]] std::uint32_t conversions() const { return conversions_; }
   [[nodiscard]] std::uint32_t overflows() const { return overflows_; }
+  [[nodiscard]] std::uint32_t restarts() const { return restarts_; }
 
 private:
   adc_continuous_handle_t handle_ = nullptr;
@@ -40,6 +42,8 @@ private:
   std::uint64_t earliest_us_ = 0;
   std::uint64_t last_publish_us_ = 0;
   std::uint32_t overflows_ = 0;
+  std::uint32_t restarts_ = 0;
+  std::uint64_t last_restart_us_ = 0;
   std::uint32_t sequence_ = 0;
 };
 

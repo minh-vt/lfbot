@@ -8,16 +8,9 @@
 namespace lf {
 namespace {
 
+constexpr std::uint32_t kIrMissingTicks = 10;  // 20 ms without a new reading
 constexpr float kDegreesPerRadian = 57.29577951F;
 constexpr float kRadiansPerDegree = 0.01745329252F;
-
-constexpr std::array<Command, 4> kBenchScript = {
-  Command{Command::Kind::kGo, 300.0F},
-  Command{Command::Kind::kTurn, 90.0F},
-  Command{Command::Kind::kTurn, -90.0F},
-  Command{Command::Kind::kGo, -300.0F},
-};
-constexpr std::uint64_t kScriptPauseUs = 700000;
 
 std::int16_t to_int16(float value) {
   return static_cast<std::int16_t>(std::clamp(value, -32768.0F, 32767.0F));
@@ -51,6 +44,9 @@ StopReason Robot::check_safety(const Measurements& measurements, std::uint64_t n
   if (!motion_.gyro_fresh(now_us)) {
     return StopReason::kGyroStale;
   }
+  if (pending_.kind == Command::Kind::kRace && ir_missing_ticks_ >= kIrMissingTicks) {
+    return StopReason::kIrStale;
+  }
   if (motion_.gyro_disagrees()) {
     return StopReason::kGyroDisagrees;
   }
@@ -69,27 +65,17 @@ void Robot::start(const Command& command, std::uint64_t now_us) {
   log_now_ = true;
 }
 
-void Robot::start_script_step(std::uint64_t now_us) {
-  start(kBenchScript[static_cast<std::size_t>(script_index_)], now_us);
-}
-
 void Robot::stop(StopReason reason, std::uint64_t now_us) {
-  phase_ = reason == StopReason::kDone ? Phase::kIdle : Phase::kStopped;
-  brake_until_us_ = reason == StopReason::kDone ? now_us + kBrakeHoldUs : 0;
+  if (reason == StopReason::kDone) {
+    phase_ = Phase::kIdle;
+    brake_until_us_ = now_us + kBrakeHoldUs;
+  } else {
+    phase_ = reason == StopReason::kFinish ? Phase::kFinished : Phase::kStopped;
+    brake_until_us_ = 0;
+  }
   reason_ = reason;
   drive_.reset();
   log_now_ = true;
-  if (script_index_ < 0) {
-    return;
-  }
-  // A finished step moves on to the next after a pause; anything else ends the routine.
-  if (reason == StopReason::kDone &&
-      static_cast<std::size_t>(script_index_) + 1 < kBenchScript.size()) {
-    ++script_index_;
-    script_next_us_ = now_us + kScriptPauseUs;
-  } else {
-    script_index_ = -1;
-  }
 }
 
 MotorOutput Robot::settle(std::uint64_t now_us) {
@@ -101,14 +87,41 @@ MotorOutput Robot::settle(std::uint64_t now_us) {
   }
   motion_.zero();
   drive_.reset();
-  if (pending_.kind == Command::Kind::kGo) {
-    maneuver_.begin_go(pending_.value, motion_, now_us);
-  } else {
-    maneuver_.begin_turn(pending_.value * kRadiansPerDegree, motion_, now_us);
+  switch (pending_.kind) {
+    case Command::Kind::kGo:
+      maneuver_.begin_go(pending_.value, motion_, now_us);
+      break;
+    case Command::Kind::kTurn:
+      maneuver_.begin_turn(pending_.value * kRadiansPerDegree, motion_, now_us);
+      break;
+    case Command::Kind::kRace:
+    case Command::Kind::kNone:
+      race_.begin(motion_, now_us);
+      break;
   }
   phase_ = Phase::kRunning;
   phase_start_us_ = now_us;
   return {};
+}
+
+Target Robot::next_target(const Measurements& measurements, std::uint64_t now_us) {
+  if (pending_.kind == Command::Kind::kRace) {
+    const Target target = race_.step(measurements, motion_, now_us);
+    if (race_.outcome() != StopReason::kNone) {
+      stop(race_.outcome(), now_us);
+    } else if (race_.state() == RaceState::kReady) {
+      // Calibrated. Wait here, motionless, until the operator presses again.
+      phase_ = Phase::kReady;
+      drive_.reset();
+      log_now_ = true;
+    }
+    return target;
+  }
+  const Target target = maneuver_.step(motion_, now_us);
+  if (maneuver_.done()) {
+    stop(StopReason::kDone, now_us);
+  }
+  return target;
 }
 
 MotorOutput Robot::run(const Measurements& measurements, std::uint64_t now_us) {
@@ -119,16 +132,15 @@ MotorOutput Robot::run(const Measurements& measurements, std::uint64_t now_us) {
     stop(unsafe, now_us);
     return brake;
   }
-  if (maneuver_.timed_out(now_us)) {
+  if (pending_.kind != Command::Kind::kRace && maneuver_.timed_out(now_us)) {
     stop(StopReason::kManeuverTimeout, now_us);
     return brake;
   }
-  const Target target = maneuver_.step(motion_, now_us);
-  if (maneuver_.done()) {
-    stop(StopReason::kDone, now_us);
-    return {};
+  const Target target = next_target(measurements, now_us);
+  if (phase_ != Phase::kRunning) {
+    return {};  // it stopped, or finished calibrating: no wheel command this tick
   }
-  return drive_.step(motion_, target.v_cps, target.omega_rad_s, measurements.battery_v);
+  return drive_.step(target, measurements.battery_v, motion_);
 }
 
 LedPattern Robot::led() const {
@@ -137,16 +149,24 @@ LedPattern Robot::led() const {
       return {ready_ ? Colour::kBlue : Colour::kOrange, Pattern::kSteady};
     case Phase::kSettling:
       return {Colour::kCyan, Pattern::kSteady};
-    case Phase::kRunning:
-      return {Colour::kGreen, Pattern::kSteady};
+    case Phase::kRunning: {
+      const bool learning =
+        pending_.kind == Command::Kind::kRace &&
+        (race_.state() == RaceState::kScan || race_.state() == RaceState::kReturn);
+      return {learning ? Colour::kCyan : Colour::kGreen, Pattern::kSteady};
+    }
+    case Phase::kReady:
+      return {Colour::kPurple, Pattern::kSteady};
     case Phase::kStopped:
       return {reason_ == StopReason::kButton ? Colour::kYellow : Colour::kRed, Pattern::kSteady};
+    case Phase::kFinished:
+      return {Colour::kWhite, Pattern::kSteady};
   }
   return {Colour::kRed, Pattern::kSteady};
 }
 
 void Robot::record(const Measurements& measurements, const MotorOutput& motor) {
-  if (phase_ == Phase::kIdle && !log_now_) {
+  if ((phase_ == Phase::kIdle || phase_ == Phase::kReady) && !log_now_) {
     return;
   }
   if (++log_ticks_ < kLogEveryTicks && !log_now_) {
@@ -170,33 +190,26 @@ void Robot::record(const Measurements& measurements, const MotorOutput& motor) {
   entry.yaw_rate_rad_s = motion_.yaw_rate_rad_s();
   for (std::size_t wheel = 0; wheel < kWheelCount; ++wheel) {
     entry.cps[wheel] = to_int16(motion_.wheel_cps(wheel));
-    entry.target_cps[wheel] = to_int16(drive_.target_cps()[wheel]);
     entry.duty_percent[wheel] = static_cast<std::int8_t>(motor.duty[wheel] * 100.0F);
   }
   entry.ir = measurements.ir.value;
+  entry.race = race_.state();
+  entry.shape = race_.view().shape;
+  entry.dark_eyes = race_.view().dark_eyes;
+  entry.position_tenths =
+    static_cast<std::int8_t>(std::clamp(race_.view().position * 10.0F, -127.0F, 127.0F));
   log_.push(entry);
 }
 
-Outputs Robot::step(const Measurements& measurements, bool button_down, std::uint64_t now_us,
-                    const Command& command) {
-  motion_.update(measurements);
-  ready_ = is_ready(measurements, now_us);
-  battery_v_ =
-    measurements.battery_v.status == SampleStatus::kValid ? measurements.battery_v.value : 0.0F;
-  const bool pressed = detect_press(button_down, now_us);
-
+MotorOutput Robot::handle_phase(bool pressed, const Measurements& measurements,
+                                std::uint64_t now_us, const Command& command) {
   MotorOutput motor;
   switch (phase_) {
     case Phase::kIdle:
-      if (pressed && script_index_ >= 0) {
-        stop(StopReason::kButton, now_us);  // a press between steps cancels the routine
-      } else if (command.kind != Command::Kind::kNone && ready_) {
+      if (command.kind != Command::Kind::kNone && ready_) {
         start(command, now_us);
       } else if (pressed && ready_) {
-        script_index_ = 0;
-        start_script_step(now_us);
-      } else if (script_index_ >= 0 && now_us >= script_next_us_) {
-        start_script_step(now_us);
+        start({Command::Kind::kRace, 0.0F}, now_us);
       }
       break;
     case Phase::kSettling:
@@ -215,18 +228,45 @@ Outputs Robot::step(const Measurements& measurements, bool button_down, std::uin
         motor = run(measurements, now_us);
       }
       break;
-    case Phase::kStopped:
-      motor.mode = MotorMode::kBrake;
+    case Phase::kReady:
+      // Calibrated. A press sets it going; nothing else does.
       if (pressed) {
+        race_.go();
+        phase_ = Phase::kRunning;
+        phase_start_us_ = now_us;
+        log_now_ = true;
+      }
+      break;
+    case Phase::kStopped:
+    case Phase::kFinished:
+      // A press acknowledges the stop; a console request is explicit enough to
+      // start the next run directly.
+      if (command.kind != Command::Kind::kNone && ready_) {
+        start(command, now_us);
+      } else if (pressed) {
         phase_ = Phase::kIdle;
-        motor.mode = MotorMode::kCoast;
       }
       break;
   }
-  if (phase_ == Phase::kStopped || (phase_ == Phase::kIdle && now_us < brake_until_us_)) {
+  if (phase_ == Phase::kReady || phase_ == Phase::kStopped || phase_ == Phase::kFinished ||
+      (phase_ == Phase::kIdle && now_us < brake_until_us_)) {
+    // Ready holds the wheels braked so the robot cannot be knocked off its start.
     motor.mode = MotorMode::kBrake;
   }
 
+  return motor;
+}
+
+Outputs Robot::step(const Measurements& measurements, bool button_down, std::uint64_t now_us,
+                    const Command& command) {
+  motion_.update(measurements);
+  ready_ = is_ready(measurements, now_us);
+  battery_v_ =
+    measurements.battery_v.status == SampleStatus::kValid ? measurements.battery_v.value : 0.0F;
+  ir_missing_ticks_ = measurements.ir.status == SampleStatus::kValid ? 0 : ir_missing_ticks_ + 1;
+  const bool pressed = detect_press(button_down, now_us);
+
+  const MotorOutput motor = handle_phase(pressed, measurements, now_us, command);
   Outputs outputs;
   outputs.motor = motor;
   record(measurements, motor);
@@ -245,8 +285,8 @@ Snapshot Robot::snapshot() const {
   Snapshot snapshot;
   snapshot.phase = phase_;
   snapshot.reason = reason_;
+  snapshot.race = race_.state();
   snapshot.ready = ready_;
-  snapshot.routine_active = script_index_ >= 0;
   snapshot.s_mm = motion_.s_counts() * kMmPerCount;
   snapshot.psi_deg = motion_.psi_rad() * kDegreesPerRadian;
   snapshot.yaw_rate_rad_s = motion_.yaw_rate_rad_s();
@@ -254,8 +294,11 @@ Snapshot Robot::snapshot() const {
   snapshot.battery_v = battery_v_;
   for (std::size_t wheel = 0; wheel < kWheelCount; ++wheel) {
     snapshot.cps[wheel] = motion_.wheel_cps(wheel);
-    snapshot.target_cps[wheel] = drive_.target_cps()[wheel];
   }
+  snapshot.usable_eyes = race_.calibration().usable_count;
+  snapshot.line_reads_higher = race_.calibration().line_reads_higher;
+  snapshot.floor_level = race_.calibration().floor;
+  snapshot.line_level = race_.calibration().line;
   return snapshot;
 }
 

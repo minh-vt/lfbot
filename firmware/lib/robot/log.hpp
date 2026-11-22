@@ -20,16 +20,19 @@ struct LogRecord {
   float psi_rad = 0.0F;
   float yaw_rate_rad_s = 0.0F;
   std::array<std::int16_t, kWheelCount> cps{};
-  std::array<std::int16_t, kWheelCount> target_cps{};
   std::array<std::int8_t, kWheelCount> duty_percent{};
   std::array<std::uint16_t, kIrCount> ir{};
+  RaceState race = RaceState::kFailed;
+  LineShape shape = LineShape::kNone;
+  std::uint8_t dark_eyes = 0;
+  std::int8_t position_tenths = 0;
 };
 
 // Ring of the most recent records. The control task is the only writer; readers
 // run when the robot is not running, so they never see a slot being overwritten.
 class LogRing {
 public:
-  static constexpr std::size_t kCapacity = 2000;
+  static constexpr std::size_t kCapacity = 4000;
 
   void push(const LogRecord& record) {
     const std::uint32_t total = total_.load(std::memory_order_relaxed);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <array>
+#include <cstdint>
 
 #include "config.hpp"
 #include "motion.hpp"
@@ -8,21 +8,19 @@
 
 namespace lf {
 
-// Forward speed (counts/s) and turn rate (rad/s, positive = left) in, one duty
-// per wheel out. Each wheel runs its own speed loop: the motor model supplies
-// the duty that should hold the target, a PI trims what the model gets wrong.
+// Applies a forward and a turn demand straight to the two wheels. There is no
+// inner speed loop: the line is followed by duty directly, so a steering change
+// reaches the wheels on the next tick instead of after the wheel-speed loop's lag.
 class Drive {
 public:
   void reset();
-  [[nodiscard]] MotorOutput step(const Motion& motion, float v_cps, float omega_rad_s,
-                                 const Sample<float>& battery);
-  [[nodiscard]] bool stalled() const;
-  [[nodiscard]] const std::array<float, kWheelCount>& target_cps() const { return target_cps_; }
+  [[nodiscard]] MotorOutput step(const Target& target, const Sample<float>& battery,
+                                 const Motion& motion);
+  [[nodiscard]] bool stalled() const { return stalled_; }
 
 private:
-  std::array<float, kWheelCount> target_cps_{};
-  std::array<float, kWheelCount> integral_{};
-  std::array<std::uint32_t, kWheelCount> stall_ticks_{};
+  bool stalled_ = false;
+  std::uint32_t stall_ticks_ = 0;
 };
 
 }  // namespace lf

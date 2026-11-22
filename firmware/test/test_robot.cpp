@@ -197,40 +197,6 @@ void test_log_records_the_stop_reason() {
           "the last record carries the reason");
 }
 
-void test_one_press_runs_the_bench_routine() {
-  Bench bench;
-  warm_up(bench);
-  for (int tick = 0; tick < 40; ++tick) {
-    bench.tick(true);
-  }
-  require(bench.robot.snapshot().routine_active, "a press starts the routine");
-  bool saw_turn = false;
-  for (int tick = 0; tick < 20000 && bench.robot.snapshot().routine_active; ++tick) {
-    bench.tick();
-    saw_turn = saw_turn || std::abs(bench.robot.snapshot().psi_deg) > 30.0F;
-  }
-  const lf::Snapshot snapshot = bench.robot.snapshot();
-  require(!snapshot.routine_active && snapshot.reason == lf::StopReason::kDone,
-          "the routine runs every step and ends done");
-  require(saw_turn, "and it included a turn");
-  require(std::abs(snapshot.s_mm + 300.0F) < 15.0F, "the last step reversed 300 mm");
-}
-
-void test_a_press_cancels_the_routine() {
-  Bench bench;
-  warm_up(bench);
-  for (int tick = 0; tick < 40; ++tick) {
-    bench.tick(true);
-  }
-  bench.run_ms(1000);
-  for (int tick = 0; tick < 40; ++tick) {
-    bench.tick(true);
-  }
-  require(!bench.robot.snapshot().routine_active, "a press ends the routine");
-  bench.run_ms(3000);
-  require(bench.robot.snapshot().phase == lf::Phase::kStopped, "and no later step starts");
-}
-
 void test_an_old_tof_reading_is_logged_as_missing() {
   Bench fresh;
   warm_up(fresh);
@@ -267,6 +233,21 @@ void test_a_finished_move_brakes_briefly_then_releases() {
   require(bench.outputs.motor.mode == lf::MotorMode::kCoast, "and released afterwards");
 }
 
+void test_a_console_request_restarts_after_a_stop() {
+  Bench bench;
+  warm_up(bench);
+  bench.tick(false, go(2000.0F));
+  bench.run_ms(1000);
+  bench.plant.gyro_alive = false;
+  bench.run_ms(100);
+  require(bench.robot.snapshot().phase == lf::Phase::kStopped, "stopped by the lost gyro");
+  bench.plant.gyro_alive = true;
+  bench.run_ms(100);
+  bench.tick(false, go(200.0F));
+  require(bench.robot.snapshot().phase == lf::Phase::kSettling,
+          "an explicit request starts the next run");
+}
+
 }  // namespace
 
 void run_robot() {
@@ -284,9 +265,8 @@ void run_robot() {
   test_low_battery_blocks_start_and_stops_a_run();
   test_nothing_moves_without_a_command();
   test_log_records_the_stop_reason();
+  test_a_console_request_restarts_after_a_stop();
   test_an_old_tof_reading_is_logged_as_missing();
   test_a_finished_move_brakes_briefly_then_releases();
-  test_one_press_runs_the_bench_routine();
-  test_a_press_cancels_the_routine();
   std::puts("robot: PASS (go, turn, stop paths, safety stops, log)");
 }

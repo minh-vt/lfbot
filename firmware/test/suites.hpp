@@ -5,3 +5,4 @@
 void run_line();
 void run_motion();
 void run_robot();
+void run_race();

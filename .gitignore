@@ -51,3 +51,9 @@ skills-lock.json
 
 # Historical native build artifacts
 /build/
+
+# KiCad local state and backups
+*.kicad_prl
+*-backups/
+fp-info-cache
+*-unsaved-export-*
