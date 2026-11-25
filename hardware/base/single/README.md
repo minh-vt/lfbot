@@ -47,10 +47,11 @@ Mọi trang 1:1 có **vạch 100 mm**. In xong đo vạch bằng thước: lệc
 | `phim/dong_mat_duoi.pdf` | Phim mặt dưới, đồng màu đen. Không lật gương: úp mặt in vào đồng |
 | `phim/dong_mat_duoi_AM-BAN.pdf` | Cùng phim, dạng âm bản (đồng trong suốt) |
 | `phim/chu_mat_tren_ui_lat_guong.pdf` | Chữ in mặt trên để ủi (tuỳ chọn) |
+| `phim/*_4ban.pdf` | Ba phim trên, mỗi tờ A4 dọc 4 bản (2 × 2, khe 6 mm để cắt rời): in thử, chọn bản đẹp nhất hoặc giữ làm dự phòng. Có thêm vạch 100 mm dọc bên cạnh: đo cả hai chiều, vì máy in có thể co giãn mỗi chiều một khác |
 | `so_do_day_nhay_mat_tren.pdf` | Vị trí 2 dây nhảy, nhìn từ trên. **Không phải phim** |
 | `so_do_lap_mat_tren.pdf`, `so_do_lap_mat_duoi.pdf` | Sơ đồ lắp; mặt dưới vẽ như nhìn từ dưới lên, có các điện trở 0 Ω. In 1:1 rồi đặt devkit, DRV, gá motor, thanh IR, bi cầu, buck lên giấy để kiểm lỗ trước khi làm mạch |
 | `khoan/single-PTH.drl`, `single-NPTH.drl`, `*-drl_map.pdf` | File khoan và bản đồ lỗ |
-| `LF-Bot_base-1side_v0.7_gerber.zip` | Nếu tìm được chỗ phay mạch CNC: đưa file này |
+| `LF-Bot_base-1side_v0.7_gerber.zip` | Gửi xưởng (in mạch 1 lớp hoặc phay CNC). Trong zip có `GHI_CHU_DAT_XUONG.txt`: 1 lớp đồng ở **mặt dưới**, mọi lỗ không mạ, kích thước, khe oval, luật nhỏ nhất. Đặt hàng chọn 1 lớp, FR-4 1,6 mm, và chép ý chính của ghi chú vào ô ghi chú đơn hàng |
 | `LF-Bot_base-1side_v0.7.step` | Mô hình 3D để ghép trong CAD cơ khí |
 
 **Chọn phim theo loại keo** như bản 2 mặt: phim khô hoặc keo UV loại âm dùng `AM-BAN`; tấm phủ sẵn cảm quang dương hoặc ủi mực laser dùng bản thường.

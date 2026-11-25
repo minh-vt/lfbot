@@ -25,7 +25,7 @@ from shapely.ops import nearest_points
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jumpers import GRAVE, LIB  # noqa: E402
 
-GND = "/GND"
+GND = "GND"
 MM = pcbnew.FromMM
 # footprint, value, pad pitch, pad length along the part (mm)
 PARTS = [("Jumper_0R_0805", "0R 0805", 2.0, 1.2), ("Jumper_0R_1206", "0R 1206", 3.1, 1.3)]

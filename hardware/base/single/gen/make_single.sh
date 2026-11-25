@@ -17,8 +17,8 @@ G=$(cd "$(dirname "$0")" && pwd); H=$(dirname "$G"); BASE=$(dirname "$H")
 KRT=${KRT:-$HOME/.local/share/kicad/10.0/3rdparty/plugins/com_github_drandyhaas_kicadroutingtools}
 W=$(mktemp -d)
 COMMON="--same-net-pad-clearance 0.3 --fab-tier standard --escalation board --no-fix-drc-settings"
-PWR='/VBAT /VBAT_F /VBAT_SW /MOT_?_A /MOT_?_B /+5V* /+3V3 /GND'
-PWW='0.8 0.8 0.6 0.8 0.8 0.5 0.5 0.5'
+PWR='/VBAT /VBAT_F /VBAT_SW /MOT_?_A /MOT_?_B +5V /+5V_BUCK +3V3 GND'
+PWW='0.8 0.8 0.6 0.8 0.8 0.5 0.5 0.5 0.5'
 [ -f "$H/single.kicad_pcb" ] && cp "$H/single.kicad_pcb" "$W/previous.kicad_pcb"
 python3 "$BASE/gen/strip_copper.py" "$BASE/fab/base.kicad_pcb" "$W/in.kicad_pcb"
 cp "$H/single.kicad_pro" "$W/in.kicad_pro"  # this board's rules (via size) for the steps below
@@ -26,13 +26,13 @@ python3 "$G/prepare.py" "$W/in.kicad_pcb"
 python3 "$G/guide.py" "$W/in.kicad_pcb"
 cd "$KRT/py_router"
 python3 -X utf8 route_planes.py "$W/in.kicad_pcb" "$W/p0.kicad_pcb" \
-    --nets /GND --plane-layers B.Cu > "$W/planes.log" 2>&1
+    --nets GND --plane-layers B.Cu > "$W/planes.log" 2>&1
 # Passes in order, "COST_F:COST_B NET ...": power, the IR channels, then
 # the rest (the bus is already laid by guide.py). GND is left out of every
-# pass ('!/GND'): the bottom pour carries it, and KRT's in-run pour taps would
+# pass ('!GND'): the bottom pour carries it, and KRT's in-run pour taps would
 # otherwise lay GND copper on the top, where no pin may take it.
-P='/VBAT /VBAT_F /VBAT_SW /MOT_?_A /MOT_?_B /+5V* /+3V3'
-PASSES="30:1 $P !/GND;30:1 /ADC_IR* /IR_* !/GND;30:1 * !/GND"
+P='/VBAT /VBAT_F /VBAT_SW /MOT_?_A /MOT_?_B +5V /+5V_BUCK +3V3'
+PASSES="30:1 $P !GND;30:1 /ADC_IR* /IR_* !GND;30:1 * !GND"
 i=0
 echo "$PASSES" | tr ';' '\n' > "$W/passes.txt"
 while read -r costs nets; do

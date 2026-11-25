@@ -27,6 +27,7 @@ Vị trí linh kiện chỉ sửa ở `fab/base.kicad_pcb`; bản 1 mặt đọc
 Mở [fab/base.kicad_pro](fab/base.kicad_pro) bằng KiCad 10. Cần thư viện Espressif cài qua Plugin and Content Manager (tên `PCM_Espressif`).
 
 - **Schematic và footprint riêng** ([Base.pretty](Base.pretty/)) sinh từ [gen/design.py](gen/design.py) và [gen/gen_fp.py](gen/gen_fp.py) qua [gen/run_all.sh](gen/run_all.sh); script không đụng tới board. Sau khi đổi chân, cập nhật pad của board bằng Update PCB from Schematic rồi chạy DRC có kiểm khớp schematic.
+- **Schematic vẽ bằng dây** ([gen/gen_sch.py](gen/gen_sch.py)): linh kiện xếp theo khối (ESP32 ở giữa, chia áp IR bên phải, DRV và encoder bên trái, I2C phía trên, nguồn phía dưới; vị trí ở `LAYOUT`), mọi tín hiệu và đường pin nối bằng dây do một bộ route lưới 2,54 mm vẽ. GND, +3V3, +5V dùng ký hiệu nguồn. Mỗi net có dây mang đúng một nhãn, chỉ để giữ tên net mà board và script dùng. Dây hai net chỉ được cắt ngang nhau, không chạm đầu hay chạy chồng; script xuất netlist ra so lại với `design.py` và dừng nếu lệch.
 - **Placement:**
   - Khoá tay 20 linh kiện mà vị trí là quyết định thiết kế: lỗ, gá motor, ESP32, hai DRV, ToF, header IR, các linh kiện dưới gầm ESP32, và cụm nguồn vào (J1, F1, J2, C1) dọc mép sau.
   - Phần còn lại do placer của **KiCadRoutingTools** (plugin PCM `com.github.drandyhaas.kicadroutingtools`) đặt:
