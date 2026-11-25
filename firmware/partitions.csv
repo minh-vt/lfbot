@@ -4,3 +4,5 @@ phy_init, data, phy, 0xf000, 0x1000,
 factory, app, factory, 0x10000, 0x300000,
 # The last five runs' logs, written when the robot stops so they survive unplugging.
 blackbox, data, 0x40, 0x310000, 0x140000,
+# Run 1's record (core/course.hpp), written when run 1 finishes; about 8 KB used.
+course, data, 0x41, 0x450000, 0x10000,

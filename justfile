@@ -1,4 +1,4 @@
-fmt_paths := "firmware/lib/robot firmware/src/esp32 firmware/test"
+fmt_paths := "firmware/core firmware/esp32 firmware/test"
 fmt_files := "\\( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \\)"
 
 default:
@@ -24,7 +24,7 @@ compiledb:
 
 lint:
     pio run -d firmware -e test -t compiledb
-    clang-tidy --warnings-as-errors=* -p firmware $(find firmware/lib/robot firmware/test -name '*.cpp')
+    clang-tidy --warnings-as-errors=* -p firmware $(find firmware/core firmware/test -name '*.cpp')
 
 check: format-check lint test build
 

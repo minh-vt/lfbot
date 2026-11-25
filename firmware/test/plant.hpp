@@ -11,9 +11,9 @@
 
 // A stand-in robot for closed-loop contract tests: two first-order motors, a
 // body that turns by the wheel speed difference, a gyro and encoders reporting
-// with the wiring signs of the real robot. The motor deliberately differs from
-// the controller's model (weaker, wider dead zone) so the speed loop has work.
-// It proves the signs and the plumbing, not that the real robot will behave.
+// with the wiring signs of the real robot. It proves the signs and the plumbing,
+// not that the real robot will behave.
+
 // A course of straight line segments, in millimetres.
 struct Segment {
   float x0;
@@ -69,11 +69,15 @@ struct Plant {
   std::uint64_t tof_age_us = 0;
   std::uint32_t sequence = 0;
 
-  // Where the robot is on the course, and what the bar would read there.
-  // ASSUMED geometry of the test: eye pitch, line width, bar ahead of the axle.
-  static constexpr float kEyePitchMm = 7.0F;
+  // Where the robot is on the course, and what the bar would read there. The bar
+  // geometry is the firmware's own assembly facts; the line is 20 mm (manual 4.2).
+  static constexpr float kEyePitchMm = lf::kEyePitchMm;
   static constexpr float kLineWidthMm = 20.0F;
-  static constexpr float kBarAheadMm = 70.0F;
+  static constexpr float kBarAheadMm = lf::kBarAheadMm;
+  // The robot's footprint around the axle: 110 mm wide, reaching a little past the bar.
+  static constexpr float kHalfWidthMm = 55.0F;
+  static constexpr float kRearMm = 30.0F;
+  static constexpr float kFrontMm = kBarAheadMm + 10.0F;
   double x_mm = 0.0;
   double y_mm = 0.0;
   std::vector<Segment> course;
@@ -81,9 +85,11 @@ struct Plant {
   std::array<bool, lf::kIrCount> saturated{};  // an eye pinned at full scale
   std::uint32_t noise_state = 12345;
 
-  // A brick on the line. The ToF sees its front face; the bar does not see it.
+  // A brick on the line at y = 0, worst case 205 mm square in plan (FAQ Q-13). The
+  // ToF sees its front face; the bar does not see it. brick_hit records any contact.
   double brick_front_x = 0.0;
   bool has_brick = false;
+  bool brick_hit = false;
   // Filled squares (a junction node) where the surface reads as line.
   std::vector<std::array<double, 4>> dark_squares;  // {cx, cy, half, unused}
 
@@ -111,6 +117,33 @@ struct Plant {
     x_mm += static_cast<double>(forward_mm_s * dt) * std::cos(yaw_rad);
     y_mm += static_cast<double>(forward_mm_s * dt) * std::sin(yaw_rad);
     yaw_rad += static_cast<double>((speed[1] - speed[0]) / lf::kTrackCountsPerRad * dt);
+    brick_hit = brick_hit || touches_brick();
+  }
+
+  // Any point of the footprint's outline inside the brick.
+  [[nodiscard]] bool touches_brick() const {
+    if (!has_brick) {
+      return false;
+    }
+    const double c = std::cos(yaw_rad);
+    const double s = std::sin(yaw_rad);
+    const double half = 0.5 * static_cast<double>(lf::kBrickSizeMm);
+    constexpr int kSteps = 20;
+    for (int i = 0; i <= kSteps; ++i) {
+      const double u = static_cast<double>(i) / kSteps;
+      const double along = -kRearMm + u * (kFrontMm + kRearMm);
+      const double across = -kHalfWidthMm + u * 2.0 * kHalfWidthMm;
+      const std::array<std::array<double, 2>, 4> outline = {
+        {{along, kHalfWidthMm}, {along, -kHalfWidthMm}, {-kRearMm, across}, {kFrontMm, across}}};
+      for (const auto& p : outline) {
+        const double x = x_mm + p[0] * c - p[1] * s;
+        const double y = y_mm + p[0] * s + p[1] * c;
+        if (x >= brick_front_x && x <= brick_front_x + 2.0 * half && std::abs(y) <= half) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   [[nodiscard]] float read_eye(std::size_t eye) {
@@ -193,9 +226,9 @@ struct Bench {
   std::uint64_t now_us = 1000000;
   lf::Outputs outputs;
 
-  void tick(bool button = false, const lf::Command& command = {}) {
+  void tick(bool button = false) {
     now_us += kTickUs;
-    outputs = robot.step(plant.measure(now_us), button, now_us, command);
+    outputs = robot.step(plant.measure(now_us), button, now_us);
     plant.advance(outputs, lf::kControlDt);
   }
   void run_ms(unsigned ms) {
@@ -203,16 +236,36 @@ struct Bench {
       tick();
     }
   }
-  // Runs until the robot leaves the running phases or the time is up.
-  void run_until_stopped(unsigned max_ms) {
-    for (unsigned i = 0; i < max_ms / 2; ++i) {
+  // Held past the debounce time, then released.
+  void press() {
+    for (int i = 0; i < 40; ++i) {
+      tick(true);
+    }
+    for (int i = 0; i < 40; ++i) {
+      tick(false);
+    }
+  }
+  [[nodiscard]] lf::Phase phase() const { return robot.snapshot().phase; }
+  // Runs until the robot reaches `wanted` or stops; false if time ran out first.
+  bool run_until(lf::Phase wanted, float limit_s) {
+    const auto ticks = static_cast<int>(limit_s * static_cast<float>(lf::kControlHz));
+    for (int i = 0; i < ticks; ++i) {
       tick();
-      const lf::Phase phase = robot.snapshot().phase;
-      if (phase == lf::Phase::kIdle || phase == lf::Phase::kStopped) {
-        if (i > 10) {
-          return;
-        }
+      const lf::Phase now = phase();
+      if (now == wanted || now == lf::Phase::kStopped || now == lf::Phase::kFinished) {
+        return now == wanted;
       }
     }
+    return false;
+  }
+  // Powered up, one press to calibrate, a second to race.
+  bool start_race() {
+    run_ms(100);
+    press();
+    if (!run_until(lf::Phase::kReady, 60.0F)) {
+      return false;
+    }
+    press();
+    return phase() == lf::Phase::kRacing;
   }
 };

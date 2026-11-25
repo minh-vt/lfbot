@@ -1,6 +1,6 @@
 # Kiến trúc firmware LF-Bot
 
-Thiết kế hiện hành, duyệt ngày 2026-11-11 ([ADR-023](decisions/ADR-023-sensor-driven-two-run-firmware.md)); điều khiển theo [ADR-024](decisions/ADR-024-dimensionless-control.md) (2026-11-16). Trạng thái thật của code nằm ở [IMPLEMENTATION](IMPLEMENTATION.md), thứ tự việc ở [PLAN](PLAN.md). Tài liệu này mô tả **cái sẽ xây**, không phải cái đã chạy.
+Thiết kế hiện hành, duyệt ngày 2026-11-11 ([ADR-023](decisions/ADR-023-sensor-driven-two-run-firmware.md)); điều khiển theo [ADR-024](decisions/ADR-024-dimensionless-control.md) (2026-11-16); một bộ bám line và né gạch bằng line ảo theo [ADR-026](decisions/ADR-026-one-follower-virtual-line.md) (2026-11-19). Trạng thái thật của code nằm ở [IMPLEMENTATION](IMPLEMENTATION.md), thứ tự việc ở [PLAN](PLAN.md). Tài liệu này mô tả **cái sẽ xây**, không phải cái đã chạy.
 
 ## 1. Mục tiêu và tiêu chí
 
@@ -17,7 +17,7 @@ Quy tắc chung:
 
 ### Sa bàn phải xử lý
 
-Theo sa bàn mẫu vòng loại (`firmware/assets/track_vongloai.png`, chỉ là fixture, không đại diện sa bàn bí mật):
+Theo sa bàn mẫu vòng loại ([`docs/track/track_vongloai.png`](track/track_vongloai.png), chỉ là fixture, không đại diện sa bàn bí mật):
 
 - Đường thẳng dài, S-curve.
 - Zigzag góc nhọn, sóng vuông góc 90°.
@@ -25,14 +25,14 @@ Theo sa bàn mẫu vòng loại (`firmware/assets/track_vongloai.png`, chỉ là
 - Hai đầu line cụt: **đích là chỗ line kết thúc**.
 - Gạch 205×95×95 mm đặt trên line (FAQ Q-13), vòng **bên phải thân xe**.
 
-Sa bàn chung kết (`firmware/assets/track_chungket.png`, BTC công bố; theo `track_chungket.json` ảnh 10 000 × 1 500 px = sân 10 000 × 1 500 mm, 1 mm mỗi pixel; ô đích 160 × 160 mm ở cuối line) thêm:
+Sa bàn chung kết ([`docs/track/track_chungket.png`](track/track_chungket.png), BTC công bố; theo `track_chungket.json` ảnh 10 000 × 1 500 px = sân 10 000 × 1 500 mm, 1 mm mỗi pixel; ô đích 160 × 160 mm ở cuối line) thêm:
 
 - Ba đường thẳng dài nối các cụm: phần lợi thời gian của lượt 2 nằm ở đây.
 - Cụm hình chữ nhật chồng nhau, tổ ong lục giác, chuỗi hình thoi chạm đỉnh: nhiều ngã ba/ngã tư liên tiếp ở 90°, 60° và 45°.
 - Sóng vuông nhiều góc 90° liền nhau và một bậc lõm có ô vuông: góc dừng-quay là chỗ tốn thời gian nhất.
 - Vòng tròn tự cắt ở góc phải trên; hai sóng sin; zigzag nhọn.
 - Hai vạch đậm ngang line và hai đoạn line đậm hơn.
-- Một ô đen đặc gần cuối hàng 3, dài 164 mm theo ảnh: **dài hơn `kNodeStraightMm` = 120 mm**, code hiện tại sẽ dừng với `wide_too_long`. Giới hạn vùng tối phải lớn hơn ô này; đo lại trên sa bàn thật.
+- Một ô đen đặc gần cuối hàng 3, dài 164 mm theo ảnh: `kNodeStraightMm` = 250 mm để vùng tối này không bị coi là `wide_too_long`; đo lại trên sa bàn thật.
 - Sóng vuông: các cạnh đứng cách nhau khoảng 100 mm theo ảnh, tức hai góc 90° cách nhau chưa tới một thân xe.
 
 ## 2. Vận hành bằng một nút
@@ -51,7 +51,7 @@ LED chỉ có màu đứng yên, **không nháy, không đếm số lần nháy*
 | Màu | Ý nghĩa |
 |---|---|
 | Xanh dương | Sẵn sàng lượt 1 |
-| Tím | Sẵn sàng lượt 2 |
+| Hồng (magenta) | Sẵn sàng lượt 2 (có bản ghi lượt 1 trong RAM hoặc flash) |
 | Cyan | Đang tự quét IR |
 | Tím | Đã quét xong, đứng yên chờ bấm chạy (hoặc đang ghi flash) |
 | Xanh lá | Đang chạy |
@@ -74,6 +74,7 @@ Kiểm một lần, ghi thẳng vào `config.hpp` kèm nguồn. Không đo lại
 | Bề ngang thân | 110 mm mép ngoài (**không phải** khoảng cách hai bánh) | Chủ dự án đo |
 | Chiều gyro Z | Kiểm ở lần chạy đầu bằng dấu chênh lệch encoder, rồi ghi hằng số | Chưa có |
 | Tỉ lệ chia áp pin | Danh định 5,0 | **Cần một lần đo bằng đồng hồ vạn năng** |
+| Chân IR của thanh (J4 → GPIO18) | Chưa biết có bật/tắt LED không, mức nào là bật | Đo bằng lệnh console `irctl` ([wiring](../hardware/wiring.md#thanh-ir-8-mắt)), ghi vào `pins::kIrCtrlWiring` |
 
 Thông tin luật: line 20 mm đen trên nền trắng (Điều 4.2), gạch 205×95×95 mm (Q-13).
 
@@ -86,12 +87,10 @@ Những gì đổi theo sân và **robot tự đo** mỗi lần Start: mức tr�
 | Chờ Start | Kiểm tra có mẫu | — | **Đo bias** khi đứng yên | Kiểm tra sẵn sàng | **Chặn Start** nếu yếu |
 | Tự quét IR | Ghi min/max từng mắt | Quay có phản hồi | **Giới hạn góc**, xác nhận xe quay thật | — | Bù feedforward |
 | Bám line | **Vị trí và hình dạng line** | Quãng đường `s` (count) | Hướng `ψ` | Giảm tốc khi có vật | Bù feedforward |
-| Góc 90° / nhọn | Phía line biến mất | Kẹt bánh | **Quay tại chỗ có phản hồi**, giới hạn góc | — | — |
-| Giao cắt | Nhận nhiều cụm / vùng rộng | Giới hạn độ dài vùng | **Giữ tốc độ quay hiện tại** | — | — |
-| Tiếp cận gạch | Vẫn bám | Kẹt bánh | — | **Khoảng cách**, dừng ở khoảng cách định | — |
-| Đo bề rộng gạch | — | — | Góc quay | **Mép gạch** (khoảng cách nhảy vọt) | — |
-| Vòng gạch | Chờ bắt lại line | **Quãng đường từng chặng** | **Góc từng chặng** | Chặn va chạm phía trước | — |
-| Xác nhận đích | Line mất ở giữa thanh | Đi thêm một đoạn | Đang đi thẳng | Không có vật | — |
+| Mất line (góc, đích) | Line quay lại dưới thanh | Lăn tới góc | **Giới hạn góc dò** mỗi phía | — | — |
+| Giao cắt | Nhận nhiều cụm / vùng rộng | Giới hạn độ dài vùng | — | — | — |
+| Vòng gạch | Chỉ nhận lại line trong hành lang | **Vị trí `x, y`** so với line ảo | **Hướng** so với line ảo | **Một lần nhìn**: khoảng cách tới mặt gạch | — |
+| Xác nhận đích | Dò hai phía không thấy | Đi thêm một đoạn | Quay về hướng cũ trước | — | — |
 | Ghi map (lượt 1) | Sự kiện, **công sức lái** | **`s`** | — | — | — |
 | Lượt 2 | Như lượt 1 | `s` để tra map | Như lượt 1 | Như lượt 1 | — |
 | Mọi lúc | Mẫu cũ thì dừng | **Kẹt bánh** thì dừng | — | — | Dưới ngưỡng thì dừng |
@@ -103,11 +102,9 @@ Những gì đổi theo sân và **robot tự đo** mỗi lần Start: mức tr�
 ```text
 IR ─┐
 Encoder ─┤        ┌─ line: vị trí, hình dạng ─┐
-Gyro Z ──┼─ số đo ─┤                           ├─ race: chọn việc, ra (tiến, lái)  
-ToF ─────┤ (có thời ├─ motion: v, ω, s, ψ ─────┤          ↑ course: công sức, mốc   
+Gyro Z ──┼─ số đo ─┤                           ├─ pilot: chọn e, ra (tiến, lái)   
+ToF ─────┤ (có thời ├─ motion: s, ψ, x, y ─────┤          ↑ course: công sức, mốc   
 Pin ─────┘  gian)  └──────────────────────────┘          ↓
-                                       maneuver (quay tới góc / đi một quãng)
-                                                          ↓
                                        drive: (tiến, lái) → trộn ưu tiên lái, bù pin → duty
                                                           ↓
                                        robot: kiểm tra an toàn → motor, LED, nhật ký
@@ -122,10 +119,10 @@ Pin ─────┘  gian)  └───────────────�
 Cách của Pololu QTR, thêm gyro để biết xe quay thật:
 
 1. Xe đặt trên line, đứng yên 0,5 s: đo bias gyro.
-2. Quay tại chỗ trái rồi phải bằng `maneuver`, biên độ tăng dần, cho tới khi **mọi mắt đã thấy cả hai mức**. Gyro giới hạn góc tối đa.
+2. Quay tại chỗ trái rồi phải với duty cố định, đảo chiều khi gyro qua biên độ, biên độ tăng dần, cho tới khi **mọi mắt đã thấy cả hai mức**.
 3. **Cực tính:** mức nào xuất hiện ít hơn trong lúc quét là line (line 20 mm, nền rộng). Không gán "ADC nhỏ là đen".
-4. Quay về hướng ban đầu theo gyro.
-5. Lệnh quay mà gyro không thấy quay, hoặc encoder đứng yên: dừng với lý do riêng (`sweep_no_turn`, `stall`), không gộp chung.
+4. Quay về hướng ban đầu theo gyro (`turn_toward`: tỉ lệ góc còn lại, giảm chấn theo tốc độ quay, không yếu hơn vùng chết).
+5. Gyro ngược dấu encoder: `gyro_disagrees`. Quá `kCalibrateTimeoutUs`: `scan_failed`.
 
 ### 6.2 Đọc line mỗi tick
 
@@ -149,55 +146,50 @@ Theo [ADR-024](decisions/ADR-024-dimensionless-control.md). Mọi đại lượn
 
 - **Vị trí line `e`:** −1…1, mắt dùng được ngoài cùng là ±1.
 - **Lái:** `Kp·e + Kd·(e − e trước)`, theo tick. Cho phép một phi tuyến đơn giản nếu thử trên sân cần.
-- **Tiến:** `F · min(g_line, g_ToF, g_nhớ)`, mỗi `g` trong 0…1. `g_line = 1 − c·|e|` có sàn; `g_ToF` giảm khi ToF thấy vật trong vài lần khoảng cách dừng; `g_nhớ` từ bản ghi lượt 1 (6.7).
+- **Tiến:** `F · g_line · nhịp`. `g_line = 1 − c·|e|` có sàn; `nhịp` là 1 ở lượt 1, ở lượt 2 lấy từ bản ghi lượt 1 (6.7). Chưa có `g_ToF`: giả lập cho thấy lượt 2 vẫn vòng gạch không chạm khi chỉ dựa vào giới hạn `kDetourDuty`; nếu xe thật tới gạch quá nhanh thì thêm ở đây.
 - **Đổi tốc:** `tiến` tăng tối đa `Δ_lên`, giảm tối đa `Δ_xuống` mỗi tick.
 - **Trộn:** trái = tiến − lái, phải = tiến + lái. `|tiến| + |lái| > 1` thì giảm tiến, giữ lái. Nhân `V_tham_chiếu / V_pin`.
 
-Không vòng tốc độ bánh, không mô hình motor, không độ cong. Encoder đếm quãng đường và phát hiện kẹt; gyro cho `maneuver` và giữ hướng qua giao cắt.
+Không vòng tốc độ bánh, không mô hình motor, không độ cong. Encoder đếm quãng đường và phát hiện kẹt; gyro cho tự quét, góc dò, vị trí `x, y` của line ảo.
 
-### 6.4 Tình huống trên line
+### 6.4 Một bộ bám line, `e` lấy từ đâu
 
-| Thấy | Làm |
-|---|---|
-| `Line` | Bám line |
-| `Wide` hoặc `Split` | Giữ **tốc độ quay hiện tại** theo gyro và đi qua: trên vòng tròn chồng nhau xe giữ độ cong, không bẻ sang nhánh khác. Giới hạn bằng quãng đường |
-| `None`, line mất ở **mép** | Góc: giảm tốc, quay tại chỗ về phía đó tới khi mắt giữa thấy line; giới hạn góc theo gyro |
-| `None`, line mất ở **giữa**, đang đi thẳng, ToF không thấy vật | Ứng viên đích → xác nhận (6.5) |
-| Quay hết giới hạn vẫn không thấy | Quay về hướng cũ, lùi theo đường vừa đi để tìm; vẫn không thấy thì dừng, đỏ, lý do `lost` |
+Theo [ADR-026](decisions/ADR-026-one-follower-virtual-line.md). `pilot` chọn độ lệch `e` (bước mắt) mỗi tick; mọi trường hợp đi qua cùng `follow_turn` / `follow_forward`.
+
+| Thấy | `e` (guide) | Tiến |
+|---|---|---|
+| `Line` | thanh IR (`line`) | theo `follow_forward` |
+| `Wide` hoặc `Split` | `e` cũ (`memory`): vòng tròn tự cắt giữ độ cong | bò; vùng tối dài quá `kNodeStraightMm` là `wide_too_long` |
+| `None` | lăn tới khi trục ở chỗ thanh mất line, rồi `±kSearchAimEyes` về phía line lệch lần cuối (mặc định phải), quá `kSearchTurnRad` thì đổi phía (`search`) | bò, rồi 0 |
+| Hai phía đều không có | quay về hướng cũ, đi thẳng `kConfirmMm` (`straight`) | 0 tới khi thẳng hướng, rồi bò |
+| Đang vòng gạch | line ảo (`virtual`) | `follow_forward`, tối đa `kDetourDuty` |
 
 ### 6.5 Đích
 
-Đích là chỗ line kết thúc. Thời gian do cổng BTC đo, robot chỉ cần dừng và lưu map.
+Đích là chỗ line kết thúc: line mất, dò hai phía không thấy, đi thẳng thêm `kConfirmMm` vẫn không thấy. Thời gian do cổng BTC đo; robot chỉ cần dừng trong ô đích 160 × 160 mm. Báo đích sớm là DNF, báo muộn gần như vô hại, nên mọi lần mất line đều dò hai phía trước.
 
-- **Ứng viên:** line biến mất ở giữa thanh, đang đi gần thẳng, không vật cản.
-- **Xác nhận:** đi thêm khoảng một thân xe, quét ± một góc nhỏ theo gyro. Không thấy line thì là **đích**: dừng, LED trắng, lưu map. Thấy thì bám tiếp.
-- Lượt 2 thêm điều kiện: ứng viên phải nằm gần điểm cuối map.
-- Báo đích sớm là DNF, báo muộn gần như vô hại, nên nghiêng về bảo thủ.
+### 6.6 Né gạch: line ảo bên phải
 
-### 6.6 Né gạch (vòng bên phải)
+1. Đang bám line thật mà ToF (tươi) thấy vật gần hơn `kBrickSeeMm`: vẽ line ảo, neo ở vị trí `x, y` và hướng `ψ` lúc đó.
+2. Line ảo là một bướu trơn lệch phải `kDetourSideMm` (nửa gạch 205 + nửa xe + biên, Q-13 xấu nhất), ra hết trước mặt gạch `kDetourLeadMm`, giữ tới sau mặt sau gạch `kDetourTailMm`, mỗi bậc dài `kDetourRampMm`.
+3. Mỗi tick tính thanh IR **sẽ đọc gì** nếu line ảo có thật (độ lệch ngang tại thanh, chia `kEyePitchMm`) và đưa vào cùng luật lái.
+4. **Nhận lại line thật** chỉ khi thanh đã qua mặt sau gạch **và** cách trục line cũ không quá `kRejoinCorridorMm`. Vệt đen ngoài hành lang là đoạn khác của sa bàn (Q-15).
+5. Đi quá cuối line ảo `kDetourSearchMm` mà chưa thấy line: `line_lost`.
 
-1. ToF hợp lệ (range status 0) thấy vật phía trước: giảm tốc theo khoảng cách, dừng ở khoảng cách định trước.
-2. **Đo bề rộng gạch:** quay phải chậm theo gyro. Khi tia ToF trượt khỏi mép gạch, khoảng cách nhảy vọt. Góc `θ` tại đó cho nửa bề rộng `w = d·tan θ`.
-3. Ba chặng, mỗi chặng có phản hồi encoder và gyro:
-   - Quay +90°, đi ngang `w + 55 mm + biên`.
-   - Quay −90°, đi dọc `205 mm + chiều dài xe + biên`. Dùng kích thước lớn nhất theo luật vì ToF không thấy chiều dọc gạch.
-   - Quay −90°, đi tới khi IR thấy line.
-4. Chỉ nhận line **trong cửa sổ quãng đường dự kiến**; sau đó quay về hướng `ψ` lúc tiếp cận và bám tiếp.
-5. ToF thấy vật trên chặng thẳng thì dừng. Quá quãng đường giới hạn thì dừng với lý do `bypass_lost`.
-
-Lệnh theo thời gian chỉ dùng làm **giới hạn thất bại**, không dùng để điều khiển chuyển động.
+Giới hạn đã biết: gạch cách góc 90° chưa tới một thân xe thì line rẽ ngang có thể nằm ngoài hành lang.
 
 ### 6.7 Hai lượt
 
-**Lượt 1 (ưu tiên về đích):** `g_nhớ = 1`, tốc độ `F` đã kiểm chứng. Mỗi đoạn N count ghi một byte: công sức `w = |lái|` lớn nhất trong đoạn, cộng cờ sự kiện (góc, vùng tối, gạch, đích).
+**Lượt 1 (ưu tiên về đích):** `nhịp = 1`, tốc độ `F` đã kiểm chứng. Mỗi đoạn `kStretchMm` (20 mm) ghi một `Stretch` hai byte: công sức `|lái|` lớn nhất trong đoạn (255 = `kTurnDutyMax`) và cờ: góc (bắt đầu dò), vùng tối (bắt đầu nhớ), gạch (đang đi line ảo). Lượt 1 không về đích thì bản ghi không được giữ.
 
-**Sau đích:** lưu bản ghi vào phân vùng flash `course`. Không tính gì thêm.
+**Sau đích:** bản ghi thành `course` trong RAM (bấm tiếp là lượt 2 ngay) và được lưu vào phân vùng flash `course` khi xe đã dừng. Không tính gì thêm.
 
 **Lượt 2:**
 - Cùng code bám line, góc, giao cắt, gạch như lượt 1.
-- Nhìn trước `H` tick theo tốc độ count hiện tại. Trong cửa sổ không có đoạn công sức vượt ngưỡng, không có góc hay vùng tối: `g_nhớ` lên `F_nhanh / F`. Có: `g_nhớ` về 1.
-- **Định vị:** `s` từ encoder; sự kiện góc/vùng tối thứ k khớp bản ghi trong cửa sổ count quanh chỗ đã ghi thì đặt lại `s`.
-- **Gạch không phải mốc** (vị trí ngẫu nhiên giữa hai lượt). Sau né gạch hoặc trượt mốc: `g_nhớ = 1` tới khi khớp mốc kế tiếp.
+- Nhìn trước `kLookaheadTicks` tick theo tốc độ count hiện tại. Trong cửa sổ mọi đoạn đều êm (công sức ≤ `kHardEffort`, không cờ nào): `nhịp = kFastPace`. Có đoạn khó, góc, vùng tối, hay đoạn lượt 1 đã vòng gạch (line dưới gạch chưa ai thấy): `nhịp = 1`. Cửa sổ chạm cuối bản ghi (đích): `nhịp = 1`.
+- `nhịp` chỉ nhân vào `follow_forward` khi bám line thật; dò, nhớ, line ảo giữ tốc độ lượt 1.
+- **Định vị:** `s` từ encoder; mỗi lần bắt đầu dò (góc) hoặc nhớ (vùng tối), tìm mốc cùng loại gần nhất, sau mốc khớp trước đó, trong `±kLandmarkWindowCounts` quanh chỗ bản ghi đang mong; khớp thì đặt lại `s`.
+- **Gạch không phải mốc** (vị trí ngẫu nhiên giữa hai lượt). Sau né gạch hoặc trượt mốc: `nhịp = 1` tới khi khớp mốc kế tiếp.
 - Hết bản ghi: chạy như lượt 1.
 
 ## 7. Luồng chạy trên ESP32-S3
@@ -210,6 +202,7 @@ Lệnh theo thời gian chỉ dùng làm **giới hạn thất bại**, không d
 
 Hiệu năng:
 - **IR: trung bình mọi lượt quét ADC giữa hai tick** (~5 lượt ở 2667 lượt/s) thay vì chỉ lấy lượt cuối.
+- **IR bật/tắt LED** (chỉ khi `kIrCtrlWiring` đã đo): mỗi tick đọc với LED ở một trạng thái rồi đổi; bỏ 2 lượt quét đầu sau mỗi lần đổi (một lượt còn trong hàng đợi DMA, một lượt cho mắt ổn định, chưa đo); gửi `(4095 + bật − tắt) / 2`. Ánh sáng phòng bị trừ; chiều của line vẫn do tự quét tìm.
 - Gyro: DLPF, dải ±1000 dps để quay tại chỗ không bão hoà; chỉ đọc 2 byte trục Z.
 - Control không cấp phát động, không `printf`, không dùng `double`.
 - Đo **thời gian thực thi tối đa và số tick trễ hạn**, hiện trong `status`.
@@ -217,7 +210,7 @@ Hiệu năng:
   - Control công bố ảnh chụp trạng thái dưới spinlock.
   - Console gửi yêu cầu qua biến atomic, control nhận ở đầu tick.
   - Không task nào khác gọi hàm của `Robot`.
-- **Nhật ký hộp đen:** vòng 2000 bản ghi nhỏ trong RAM (pha, vị trí line, hình dạng, `v`, `ω`, ToF, lý do dừng). Lệnh `log` đổ ra sau mỗi lần chạy.
+- **Nhật ký hộp đen:** vòng 4000 bản ghi 50 Hz trong RAM (pha, lý do dừng, `s`, `ψ`, tốc độ và duty hai bánh, ToF, IR thô, nguồn `e`, hình dạng, vị trí line, nhịp lượt 2); 5 lần chạy gần nhất giữ trong flash. Lệnh `log` đổ ra.
 
 ## 8. An toàn
 
@@ -233,25 +226,28 @@ Mỗi lý do dừng là một giá trị enum, có trong nhật ký. Không gộ
 ## 9. Cấu trúc code
 
 ```text
-firmware/lib/robot/          core: C++17, không ESP-IDF, chạy trên host
+firmware/core/       C++17 phẳng, không ESP-IDF, chạy trên host
   types.hpp       số đo, đầu ra, enum lý do dừng
   config.hpp      mọi hằng số; mỗi số ghi nguồn: sự thật lắp ráp / đo ở nhà / chỉnh trên đường thử / luật
   line.*          tự quét, chuẩn hoá, vị trí, hình dạng
-  motion.*        encoder + gyro → v, ω, s, ψ; bias gyro; phát hiện kẹt bánh
-  drive.*         (tiến, lái) → duty hai bánh, ưu tiên lái, bù pin
-  maneuver.*      quay tới góc / đi một quãng có phản hồi
-  course.*        ghi công sức và sự kiện, nhìn trước, khớp mốc
-  race.*          một switch trạng thái: Quét, Bám, Góc, Giao cắt, Tiếp cận, Vòng gạch, Bắt line, Xác nhận đích, Xong, Lỗi
-  robot.*         nút, an toàn, LED, nhật ký; Robot::step()
-firmware/src/esp32/
-  adc_inputs  encoders  imu  tof (+ tof_platform)  motors  status_led  button  console
-  course_store    phân vùng flash course
+  motion.*        encoder + gyro → tốc độ bánh, s, ψ, x, y; bias gyro
+  drive.*         (tiến, lái) → duty hai bánh, ưu tiên lái, giới hạn đổi tốc, bù pin, kẹt bánh
+  pilot.*         tự quét; chọn e (line, nhớ, dò, thẳng, line ảo); luật lái; Detour
+  course.*        lượt 1 ghi công sức và mốc; lượt 2 nhìn trước, khớp mốc, ra nhịp
+  robot.*         nút và chế độ (chờ, hiệu chuẩn, sẵn sàng, đua, dừng), an toàn, LED, nhật ký
+firmware/esp32/      chương trình ESP32 (src_dir của PlatformIO)
   main.cpp        tạo task, nối driver với Robot
+  console.*       lệnh đọc trạng thái, nhật ký, irctl
+  pins.hpp        bảng chân của board 1 mặt
+  drivers/        adc_inputs encoders imu tof (+ tof_platform) motors status_led button
+  storage/        blackbox (nhật ký), course_store (bản ghi lượt 1)
+firmware/test/       test hợp đồng trên host; plant.hpp là xe giả
+firmware/third_party/vl53l1x/   ST ULD cho ToF
 ```
 
-- `maneuver` là **một** cơ chế "quay tới góc / đi một quãng có phản hồi" dùng chung cho tự quét, góc 90°, xác nhận đích và vòng gạch.
+- Không có cơ chế "đi X mm / quay Y rad": mọi chuyển động trong lúc đua là bám một đường, thật hoặc ảo.
 - Không interface ảo, factory, plugin, event bus hay framework máy trạng thái.
-- Phân vùng flash thêm `course` 128 KB; sa bàn 30 m cần khoảng 12 KB.
+- Phân vùng flash `course` 64 KB; bản ghi tối đa 4096 đoạn (82 m) = 8 KB, sa bàn 30 m dùng khoảng 3 KB. Bản ghi có checksum và kích thước đoạn; firmware cắt line khác thì từ chối bản ghi cũ.
 
 ### Test
 
@@ -259,8 +255,9 @@ firmware/src/esp32/
   - Stop luôn dừng.
   - Mẫu cũ không giữ motor chạy.
   - Trộn bánh không bao giờ cắt lệnh lái; `tiến` không đổi nhanh hơn `Δ`.
-  - Lượt 2 không vượt tốc độ lượt 1 khi cửa sổ nhìn trước có đoạn khó.
-  - Khớp mốc đúng/sai cửa sổ.
+  - Vòng gạch không chạm gạch; không nhận line nằm ngoài hành lang.
+  - Lượt 2 không vượt tốc độ lượt 1 khi cửa sổ nhìn trước có đoạn khó; nhanh hơn lượt 1 trên cùng đường giả lập; vẫn vòng gạch mới không chạm.
+  - Khớp mốc đúng/sai cửa sổ; sau line ảo thì không chắc vị trí.
   - Toán odometry.
 - Phần đọc line kiểm bằng **nhật ký thật ghi từ xe**, không bằng tín hiệu tự dựng.
 - Nghiệm thu mỗi bước là xe chạy thật ([PLAN](PLAN.md)).

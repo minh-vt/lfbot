@@ -62,6 +62,37 @@ void test_gyro_integrates_a_turn_and_bias_is_removed() {
   require(motion.psi_rad() > 0.0F, "a left turn is positive");
 }
 
+// Position on the floor follows the heading: a quarter turn then straight goes sideways.
+void test_odometry_tracks_position_on_the_floor() {
+  Plant plant;
+  lf::Motion motion;
+  std::uint64_t now_us = 0;
+  require(find_bias(plant, motion, now_us, 500), "still at the start");
+  motion.zero();
+  const auto run = [&](float left, float right, int ticks) {
+    for (int tick = 0; tick < ticks; ++tick) {
+      now_us += Bench::kTickUs;
+      plant.speed = {left, right};
+      for (std::size_t wheel = 0; wheel < lf::kWheelCount; ++wheel) {
+        plant.counts[wheel] += static_cast<double>(plant.speed[wheel] * lf::kControlDt);
+      }
+      plant.yaw_rad +=
+        static_cast<double>((right - left) / lf::kTrackCountsPerRad * lf::kControlDt);
+      motion.update(plant.measure(now_us));
+    }
+  };
+  run(3000.0F, 3000.0F, 500);  // straight ahead
+  require(
+    std::abs(motion.x_mm() - 3000.0F * lf::kMmPerCount) < 5.0F && std::abs(motion.y_mm()) < 2.0F,
+    "straight ahead is along x");
+  const float x_before = motion.x_mm();
+  const int quarter = static_cast<int>(1.5707963F * lf::kTrackCountsPerRad / 2000.0F * 500.0F);
+  run(-1000.0F, 1000.0F, quarter);  // a quarter turn left in place
+  run(3000.0F, 3000.0F, 500);
+  require(std::abs(motion.x_mm() - x_before) < 10.0F, "after a left quarter turn x stays");
+  require(std::abs(motion.y_mm() - 3000.0F * lf::kMmPerCount) < 10.0F, "and y grows to the left");
+}
+
 void test_a_shaken_robot_gives_no_bias_and_a_bump_is_waited_out() {
   Plant shaken;
   lf::Motion motion;
@@ -91,23 +122,55 @@ void test_a_shaken_robot_gives_no_bias_and_a_bump_is_waited_out() {
   require(accepted, "a short bump does not stop the robot starting once it is still");
 }
 
-void test_direct_duty_applies_forward_and_turn() {
+// Steps the drive for `ticks` ticks with the same demand; returns the last output.
+lf::MotorOutput hold(lf::Drive& drive, const lf::Target& target, int ticks) {
   Plant plant;
   lf::Motion motion;
-  lf::Drive drive;
-  std::uint64_t now_us = 0;
-  const lf::Measurements m = plant.measure(now_us);
+  const lf::Measurements m = plant.measure(0);
   motion.update(m);
-  const lf::Sample<float>& battery = m.battery_v;
-  const lf::MotorOutput straight = drive.step({0.5F, 0.0F}, battery, motion);
+  lf::MotorOutput output;
+  for (int tick = 0; tick < ticks; ++tick) {
+    output = drive.step(target, m.battery_v, motion);
+  }
+  return output;
+}
+
+void test_direct_duty_applies_forward_and_turn() {
+  lf::Drive drive;
+  const lf::MotorOutput straight = hold(drive, {0.5F, 0.0F}, 500);
   require(straight.duty[0] > 0.4F && straight.duty[1] > 0.4F, "forward drives both wheels");
-  const lf::MotorOutput left = drive.step({0.0F, 0.5F}, battery, motion);
+  require(std::abs(straight.duty[0] - straight.duty[1]) < 1e-4F, "and evenly");
+  drive.reset();
+  const lf::MotorOutput left = hold(drive, {0.0F, 0.5F}, 1);
   require(left.duty[0] < left.duty[1], "a positive turn (left) drives the right wheel harder");
-  const lf::MotorOutput right = drive.step({0.0F, -0.5F}, battery, motion);
+  const lf::MotorOutput right = hold(drive, {0.0F, -0.5F}, 1);
   require(right.duty[0] > right.duty[1], "a negative turn (right) drives the left wheel harder");
-  const lf::MotorOutput clamped = drive.step({1.0F, 1.0F}, battery, motion);
+  const lf::MotorOutput clamped = hold(drive, {1.0F, 1.0F}, 500);
   require(std::abs(clamped.duty[0]) <= lf::kMaxDuty && std::abs(clamped.duty[1]) <= lf::kMaxDuty,
           "duty never exceeds the limit");
+}
+
+// A saturated wheel must not eat the turn: forward gives way instead.
+void test_steering_wins_when_a_wheel_saturates() {
+  lf::Drive drive;
+  const lf::MotorOutput output = hold(drive, {0.8F, 0.5F}, 500);
+  const lf::MotorOutput turn_only = hold(drive, {0.0F, 0.5F}, 500);
+  const float wanted = turn_only.duty[1] - turn_only.duty[0];
+  require(std::abs((output.duty[1] - output.duty[0]) - wanted) < 1e-3F,
+          "the wheel difference is the whole turn even at full forward");
+  require(output.duty[0] + output.duty[1] > 0.5F, "and what forward is left still drives forward");
+}
+
+// The robot cannot be thrown from standstill to full duty in one tick.
+void test_forward_rises_gradually_and_falls_quickly() {
+  lf::Drive drive;
+  const lf::MotorOutput first = hold(drive, {0.7F, 0.0F}, 1);
+  require(first.duty[0] < 0.1F, "one tick after a start the push is still small");
+  const lf::MotorOutput cruising = hold(drive, {0.7F, 0.0F}, 1000);
+  require(cruising.duty[0] > 0.6F, "and it reaches the demand");
+  const int rise_ticks = static_cast<int>(0.7F / lf::kForwardRisePerTick);
+  const lf::MotorOutput slowed = hold(drive, {0.0F, 0.0F}, rise_ticks / 4);
+  require(slowed.duty[0] < 0.05F, "slowing down is at least four times faster than speeding up");
 }
 
 void test_a_commanded_robot_that_does_not_move_is_stalled() {
@@ -132,6 +195,9 @@ void run_motion() {
   test_gyro_integrates_a_turn_and_bias_is_removed();
   test_a_shaken_robot_gives_no_bias_and_a_bump_is_waited_out();
   test_direct_duty_applies_forward_and_turn();
+  test_steering_wins_when_a_wheel_saturates();
+  test_forward_rises_gradually_and_falls_quickly();
+  test_odometry_tracks_position_on_the_floor();
   test_a_commanded_robot_that_does_not_move_is_stalled();
-  std::puts("motion: PASS (signs, odometry, gyro bias, speed loop)");
+  std::puts("motion: PASS (signs, odometry, position, gyro bias, wheel mixing)");
 }

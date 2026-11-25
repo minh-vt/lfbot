@@ -1,10 +1,10 @@
 # ADR-024: Điều khiển không thứ nguyên, lượt 2 dùng "công sức" đã ghi ở lượt 1
 
-**Status:** Accepted, chủ dự án yêu cầu ngày 2026-11-16. Thay phần điều khiển của [ADR-023](ADR-023-sensor-driven-two-run-firmware.md): vòng tốc độ bánh theo mô hình motor, feedforward `ω = v·κ`, profile `v ≤ √(a_ngang/|κ|)` với quét phanh/tăng tốc. Các phần khác của ADR-023 giữ nguyên. Chưa triển khai.
+**Status:** Accepted, chủ dự án yêu cầu ngày 2026-11-16. Triển khai ngày 2026-11-19 cùng [ADR-026](ADR-026-one-follower-virtual-line.md), chưa chạy trên xe. Khác mô tả dưới đây ở ba điểm: mỗi đoạn hai byte (công sức, cờ) thay vì một; chưa có `g_ToF`; đoạn lượt 1 đã vòng gạch được coi là khó.
 
 ## Bối cảnh
 
-ADR-023 và báo cáo nghiên cứu ([reports/Robot do line va ne vat can.md](../../reports/Robot%20do%20line%20va%20ne%20vat%20can.md)) mô tả điều khiển theo vật lý: m/s, rad/s, độ cong, gia tốc ngang, mô hình motor. Mỗi đại lượng đó cần một phép đo hoặc một giả định (hệ số bám, hằng số thời gian motor, khoảng cách thanh IR tới trục). Robot không đo được phần lớn chúng, và mỗi giả định sai làm cả mô hình lệch khỏi xe thật. Chủ dự án đã bỏ vòng tốc độ bánh vì nó làm xe phản ứng chậm. Code hiện tại ([race.cpp](../../firmware/lib/robot/race.cpp)) đã lái bằng duty và vị trí line theo bước mắt, tức gần như không đơn vị, và đó là phần chạy được.
+Báo cáo nghiên cứu ([line-following-and-obstacles](../research/line-following-and-obstacles.md)) mô tả điều khiển theo vật lý: m/s, rad/s, độ cong, gia tốc ngang, mô hình motor. Mỗi đại lượng đó cần một phép đo hoặc một giả định (hệ số bám, hằng số thời gian motor, khoảng cách thanh IR tới trục). Robot không đo được phần lớn chúng, và mỗi giả định sai làm cả mô hình lệch khỏi xe thật. Chủ dự án đã bỏ vòng tốc độ bánh vì nó làm xe phản ứng chậm. Code lúc đó đã lái bằng duty và vị trí line theo bước mắt, tức gần như không đơn vị, và đó là phần chạy được.
 
 ## Quyết định
 
